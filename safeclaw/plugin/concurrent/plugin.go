@@ -80,6 +80,7 @@ func run(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []
 
 func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	logger := safeclaw.GetLogger(t)
+	ctx := safeclaw.GetContext(t) // Fix Bug 3: Get the actual execution context
 
 	var callablesList *starlark.List
 	var maxConcurrency int
@@ -112,8 +113,8 @@ func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 		done:    make(chan struct{}),
 	}
 
-	// Use errgroup for controlled concurrency
-	g, _ := errgroup.WithContext(context.Background())
+	// Use errgroup for controlled concurrency with the actual context
+	g, gCtx := errgroup.WithContext(ctx) // Fix Bug 3: Use the actual context for cancellation propagation
 	g.SetLimit(maxConcurrency)
 
 	for i, callableObj := range callables {
@@ -128,13 +129,21 @@ func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 		g.Go(func() error {
 			defer close(future.done)
 			
+			// Check if context is cancelled before starting work
+			if err := gCtx.Err(); err != nil {
+				future.mu.Lock()
+				future.err = err
+				future.mu.Unlock()
+				return nil
+			}
+			
 			// Create a new thread for the goroutine
 			subThread := &starlark.Thread{
 				Name: "concurrent",
 				Print: t.Print,
 			}
-			// Copy thread-local storage
-			subThread.SetLocal("ctx", t.Local("ctx"))
+			// Use the errgroup context for cancellation propagation
+			subThread.SetLocal("ctx", gCtx)
 			subThread.SetLocal("logger", t.Local("logger"))
 			
 			result, err := starlark.Call(subThread, callableObj.Fn, callableObj.Args, nil)

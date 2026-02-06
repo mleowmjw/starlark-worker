@@ -127,6 +127,7 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 		logger.Error("request.do: request failed", "error", err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
+	defer res.Body.Close() // Fix Bug 1: Close the original response body to prevent resource leak
 
 	// Serialize the response to bytes (like the original does)
 	var buf bytes.Buffer
@@ -147,7 +148,9 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 
 // Response wraps http.Response for Starlark
 type Response struct {
-	Response *http.Response
+	Response   *http.Response
+	bodyCache  []byte // Fix Bug 2: Cache the body so it can be read multiple times
+	bodyRead   bool
 }
 
 var _ starlark.Value = &Response{}
@@ -158,6 +161,19 @@ func (r *Response) Type() string          { return "Response" }
 func (r *Response) Freeze()                {}
 func (r *Response) Truth() starlark.Bool  { return true }
 func (r *Response) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: Response") }
+
+// readBody reads and caches the response body on first call
+func (r *Response) readBody() ([]byte, error) {
+	if !r.bodyRead {
+		body, err := io.ReadAll(r.Response.Body)
+		if err != nil {
+			return nil, err
+		}
+		r.bodyCache = body
+		r.bodyRead = true
+	}
+	return r.bodyCache, nil
+}
 
 func (r *Response) Attr(name string) (starlark.Value, error) {
 	switch name {
@@ -174,13 +190,13 @@ func (r *Response) Attr(name string) (starlark.Value, error) {
 		}
 		return headers, nil
 	case "text":
-		body, err := io.ReadAll(r.Response.Body)
+		body, err := r.readBody()
 		if err != nil {
 			return nil, err
 		}
 		return starlark.String(body), nil
 	case "json":
-		body, err := io.ReadAll(r.Response.Body)
+		body, err := r.readBody()
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +206,7 @@ func (r *Response) Attr(name string) (starlark.Value, error) {
 		}
 		return result, nil
 	case "content":
-		body, err := io.ReadAll(r.Response.Body)
+		body, err := r.readBody()
 		if err != nil {
 			return nil, err
 		}

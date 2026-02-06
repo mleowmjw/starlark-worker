@@ -78,8 +78,22 @@ func _sleep(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwarg
 		return starlark.None, err
 	}
 
-	time.Sleep(time.Duration(float64(time.Second) * sf))
-	return starlark.None, nil
+	duration := time.Duration(float64(time.Second) * sf)
+	
+	// Fix Bug 3: Respect context cancellation
+	ctx := safeclaw.GetContext(t)
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	
+	select {
+	case <-timer.C:
+		// Sleep completed normally
+		return starlark.None, nil
+	case <-ctx.Done():
+		// Context was cancelled or timed out
+		logger.Info("time.sleep: interrupted by context cancellation", "elapsed", duration)
+		return nil, ctx.Err()
+	}
 }
 
 // _time_ns returns time as an integer number of nanoseconds since the epoch.
