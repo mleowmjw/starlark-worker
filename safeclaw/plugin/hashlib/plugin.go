@@ -1,0 +1,84 @@
+package hashlib
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/cadence-workflow/starlark-worker/safeclaw"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
+	"go.starlark.net/starlark"
+	"golang.org/x/crypto/blake2b"
+)
+
+type plugin struct{}
+
+var Plugin safeclaw.Plugin = &plugin{}
+
+func (p *plugin) ID() string {
+	return "hashlib"
+}
+
+func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
+	return &Module{}
+}
+
+type Module struct{}
+
+var _ starlark.HasAttrs = &Module{}
+
+func (f *Module) String() string                        { return "hashlib" }
+func (f *Module) Type() string                          { return "hashlib" }
+func (f *Module) Freeze()                               {}
+func (f *Module) Truth() starlark.Bool                  { return true }
+func (f *Module) Hash() (uint32, error)                 { return 0, fmt.Errorf("unhashable: hashlib") }
+func (f *Module) Attr(n string) (starlark.Value, error) { return star.Attr(f, n, builtins, properties) }
+func (f *Module) AttrNames() []string                   { return star.AttrNames(builtins, properties) }
+
+var properties = map[string]star.PropertyFactory{}
+
+var builtins = map[string]*starlark.Builtin{
+	"blake2b_hex": starlark.NewBuiltin("blake2b_hex", blake2b_hex),
+}
+
+// blake2b_hex calculate the hash value given a string
+// Arguments:
+//   - data: the origin string to calculate the hash
+//   - digest_size: the byte size of the return hash value. Note that the actual length of the hash hex will be digest_size * 2
+//
+// Return: The calculated hash value
+func blake2b_hex(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	logger := safeclaw.GetLogger(t)
+
+	var data string
+	var digestSize int
+	if err := starlark.UnpackArgs("blake2b_hex", args, kwargs, "data", &data, "digest_size", &digestSize); err != nil {
+		logger.Error("blake2b_hex: unpack args failed", "error", err)
+		return nil, err
+	}
+
+	// Calculate hash value for the raw string
+	v, err := hashWithBlake2b(data, digestSize)
+	if err != nil {
+		logger.Error("blake2b_hex: hash failed", "error", err)
+		return nil, err
+	}
+	return starlark.String(v), nil
+}
+
+func hashWithBlake2b(input string, outputSize int) (string, error) {
+	// Create a BLAKE2b hash with the specified output size
+	hash, err := blake2b.New(outputSize, nil) // `nil` key means no key (not using MAC mode)
+	if err != nil {
+		return "", err
+	}
+
+	// Write data to the hash
+	hash.Write([]byte(input))
+
+	// Compute the hash
+	sum := hash.Sum(nil)
+
+	// Return the hash as a hexadecimal string
+	// Each byte in sum will be represented as two chars.
+	return fmt.Sprintf("%x", sum), nil
+}
