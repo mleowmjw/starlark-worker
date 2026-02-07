@@ -14,6 +14,7 @@ import (
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/test"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/time"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/uuid"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/whatsapp"
 )
 
 // DefaultPlugins returns the standard set of safeclaw plugins.
@@ -31,5 +32,6 @@ func DefaultPlugins() []safeclaw.Plugin {
 		test.Plugin,
 		time.Plugin,
 		uuid.Plugin,
+		whatsapp.Plugin,
 	}
 }
