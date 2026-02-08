@@ -1761,6 +1761,36 @@ The library is production-ready for use as a safe, hermetic core for agent syste
 
 ---
 
+## SQLite Plugin Learnings (2026-02)
+
+### Why this plugin exists
+- We needed durable, local state for Starlark scripts without exposing a shell.
+- The `script` plugin can execute arbitrary commands, so using `sqlite3` CLI via `script.exec` was rejected for safety.
+- A dedicated `sqlite` plugin provides a narrower, auditable capability surface.
+
+### Implementation summary
+- New plugin: `safeclaw/plugin/sqlite`
+- Methods:
+  - `sqlite.exec(db_path, sql)` → executes SQL and returns `{rows_affected, last_insert_id}`
+  - `sqlite.query(db_path, sql)` → returns list of dict rows
+- Uses **pure-Go sqlite driver** (`modernc.org/sqlite`) to eliminate external binary dependencies.
+- Ensures DB directory exists before opening.
+- Requires `db_path` (empty path is an error).
+
+### Usage pattern (Starlark)
+```python
+load("@plugin", "sqlite")
+rows = sqlite.query(db_path="data/automation.sqlite", sql="SELECT id FROM t;")
+```
+
+### Security guidance
+- Prefer `sqlite` over `script.exec` for state.
+- Combine with a **hardened runner** (minimal plugin set + restricted FS root) to reduce attack surface.
+
+### Common pitfalls
+- Starlark multiline string concatenation inside `(...)` requires explicit `+` operators.
+- `RunSource` uses MemoryFS, so module `load("...")` won’t work unless you use `RunScript` with `LocalFS` (or TarFS).
+
 **Document Version**: 1.1  
 **Last Updated**: 2026-02-07  
 **Maintained By**: AI Agent Implementation Team

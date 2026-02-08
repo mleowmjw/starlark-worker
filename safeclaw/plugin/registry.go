@@ -11,6 +11,7 @@ import (
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/random"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/request"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/script"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/sqlite"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/test"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/time"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/uuid"
@@ -29,6 +30,7 @@ func DefaultPlugins() []safeclaw.Plugin {
 		random.Plugin,
 		request.Plugin,
 		script.Plugin,
+		sqlite.Plugin,
 		test.Plugin,
 		time.Plugin,
 		uuid.Plugin,
