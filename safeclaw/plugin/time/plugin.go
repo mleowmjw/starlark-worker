@@ -1,8 +1,6 @@
 package time
 
 import (
-	"context"
-
 	"fmt"
 	"strings"
 	"time"
@@ -34,18 +32,9 @@ func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	// Get workflow backend from context
 	backend := workflow.GetBackend(ctx)
 
-	// Extract the standard context if possible
-	var stdCtx context.Context
-	if c, ok := ctx.(context.Context); ok {
-		stdCtx = c
-	} else {
-		stdCtx = context.Background()
-	}
-
 	m := &Module{
 		delta:   delta,
 		backend: backend,
-		ctx:     stdCtx,
 	}
 	m.attributes = map[string]starlark.Value{
 		"sleep":              starlark.NewBuiltin("sleep", _sleep).BindReceiver(m),
@@ -60,7 +49,6 @@ type Module struct {
 	attributes map[string]starlark.Value
 	delta      time.Duration
 	backend    workflow.Backend
-	ctx        context.Context
 }
 
 func (m *Module) String() string                        { return "time" }
@@ -98,27 +86,11 @@ func _sleep(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwarg
 
 	duration := time.Duration(float64(time.Second) * sf)
 
-	// Use workflow backend if available, otherwise direct execution
-	if receiver.backend != nil && receiver.backend.InWorkflow() {
-		if err := receiver.backend.Sleep(duration); err != nil {
-			logger.Error("time.sleep: workflow sleep failed", "error", err)
-			return nil, err
-		}
-		return starlark.None, nil
+	if err := receiver.backend.Sleep(duration); err != nil {
+		logger.Error("time.sleep: sleep failed", "error", err)
+		return nil, err
 	}
-
-	// Direct execution (dev mode) - respect context cancellation
-	ctx := receiver.ctx
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-
-	select {
-	case <-timer.C:
-		return starlark.None, nil
-	case <-ctx.Done():
-		logger.Info("time.sleep: interrupted by context cancellation", "elapsed", duration)
-		return nil, ctx.Err()
-	}
+	return starlark.None, nil
 }
 
 // _time_ns returns time as an integer number of nanoseconds since the epoch.
@@ -126,15 +98,9 @@ func _time_ns(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwa
 	receiver := fn.Receiver().(*Module)
 
 	var ns int64
-	if receiver.backend != nil && receiver.backend.InWorkflow() {
-		// Use workflow-backed time (deterministic)
-		receiver.backend.SideEffect(func() any {
-			return receiver.backend.Now().Add(receiver.delta).UnixNano()
-		}).Get(&ns)
-	} else {
-		// Direct execution (dev mode)
-		ns = time.Now().Add(receiver.delta).UnixNano()
-	}
+	receiver.backend.SideEffect(func() any {
+		return receiver.backend.Now().Add(receiver.delta).UnixNano()
+	}).Get(&ns)
 
 	return starlark.MakeInt64(ns), nil
 }
@@ -144,15 +110,9 @@ func _time(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs
 	receiver := fn.Receiver().(*Module)
 
 	var ns int64
-	if receiver.backend != nil && receiver.backend.InWorkflow() {
-		// Use workflow-backed time (deterministic)
-		receiver.backend.SideEffect(func() any {
-			return receiver.backend.Now().Add(receiver.delta).UnixNano()
-		}).Get(&ns)
-	} else {
-		// Direct execution (dev mode)
-		ns = time.Now().Add(receiver.delta).UnixNano()
-	}
+	receiver.backend.SideEffect(func() any {
+		return receiver.backend.Now().Add(receiver.delta).UnixNano()
+	}).Get(&ns)
 
 	sec := float64(ns) / 1e9
 	return starlark.Float(sec), nil

@@ -1,10 +1,8 @@
 package request
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-
 	"fmt"
 	"io"
 	"net/http"
@@ -19,8 +17,15 @@ type plugin struct{}
 
 var Plugin safeclaw.Plugin = &plugin{}
 
+var _ safeclaw.Registrar = (*plugin)(nil)
+
 func (p *plugin) ID() string {
 	return "request"
+}
+
+// RegisterActivities registers the HTTP request activity with the Temporal worker.
+func (p *plugin) RegisterActivities(registerFn func(activity any)) {
+	registerFn(HTTPRequestActivity)
 }
 
 func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
@@ -121,64 +126,23 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 		}
 	}
 
-	// Check if we should use workflow activity
-	if module.backend != nil && module.backend.InWorkflow() {
-		// Execute via Temporal activity
-		input := HTTPRequestInput{
-			Method:  method.GoString(),
-			URL:     url.GoString(),
-			Body:    bodyBytes,
-			Headers: headerMap,
-		}
-
-		var output HTTPRequestOutput
-		err := module.backend.ExecuteActivity(HTTPRequestActivity, input).Get(&output)
-		if err != nil {
-			logger.Error("request.do: activity failed", "error", err)
-			return nil, fmt.Errorf("activity failed: %w", err)
-		}
-
-		// Convert output to Response
-		return activityOutputToResponse(output)
+	// Execute via activity (works for both local and workflow backends)
+	input := HTTPRequestInput{
+		Method:  method.GoString(),
+		URL:     url.GoString(),
+		Body:    bodyBytes,
+		Headers: headerMap,
 	}
 
-	// Direct execution (dev mode)
-	var br io.Reader
-	if len(bodyBytes) > 0 {
-		br = bytes.NewBuffer(bodyBytes)
-	}
-
-	req, err := http.NewRequestWithContext(module.ctx, method.GoString(), url.GoString(), br)
+	var output HTTPRequestOutput
+	err := module.backend.ExecuteActivity(HTTPRequestActivity, input).Get(&output)
 	if err != nil {
-		logger.Error("request.do: failed to create request", "error", err)
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		logger.Error("request.do: activity failed", "error", err)
+		return nil, fmt.Errorf("activity failed: %w", err)
 	}
 
-	req.Header = http.Header(headerMap)
-
-	// Execute the request
-	res, err := module.client.Do(req)
-	if err != nil {
-		logger.Error("request.do: request failed", "error", err)
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer res.Body.Close()
-
-	// Serialize the response to bytes
-	var buf bytes.Buffer
-	if err := res.Write(&buf); err != nil {
-		logger.Error("request.do: failed to serialize response", "error", err)
-		return nil, fmt.Errorf("failed to serialize response: %w", err)
-	}
-
-	// Parse it back to create a Response object
-	parsedRes, err := http.ReadResponse(bufio.NewReader(&buf), nil)
-	if err != nil {
-		logger.Error("request.do: failed to parse response", "error", err)
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &Response{Response: parsedRes}, nil
+	// Convert output to Response
+	return activityOutputToResponse(output)
 }
 
 // activityOutputToResponse converts HTTPRequestOutput to a Response.

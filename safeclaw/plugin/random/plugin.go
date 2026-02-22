@@ -76,22 +76,12 @@ func (m *Module) randIntFn(t *starlark.Thread, fn *starlark.Builtin, args starla
 	}
 
 	var v int
-	if m.backend != nil && m.backend.InWorkflow() {
-		// Use workflow SideEffect for deterministic replay
-		m.backend.SideEffect(func() any {
-			if m.rand != nil {
-				return m.rand.IntN(max-min+1) + min
-			}
-			return rand.IntN(max-min+1) + min
-		}).Get(&v)
-	} else {
-		// Direct execution (dev mode)
+	m.backend.SideEffect(func() any {
 		if m.rand != nil {
-			v = m.rand.IntN(max-min+1) + min
-		} else {
-			v = rand.IntN(max-min+1) + min
+			return m.rand.IntN(max-min+1) + min
 		}
-	}
+		return rand.IntN(max-min+1) + min
+	}).Get(&v)
 
 	return starlark.MakeInt(v), nil
 }
@@ -99,22 +89,12 @@ func (m *Module) randIntFn(t *starlark.Thread, fn *starlark.Builtin, args starla
 // randFn generates a random floating point number between 0 and 1
 func (m *Module) randFn(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var v float64
-	if m.backend != nil && m.backend.InWorkflow() {
-		// Use workflow SideEffect for deterministic replay
-		m.backend.SideEffect(func() any {
-			if m.rand != nil {
-				return m.rand.Float64()
-			}
-			return rand.Float64()
-		}).Get(&v)
-	} else {
-		// Direct execution (dev mode)
+	m.backend.SideEffect(func() any {
 		if m.rand != nil {
-			v = m.rand.Float64()
-		} else {
-			v = rand.Float64()
+			return m.rand.Float64()
 		}
-	}
+		return rand.Float64()
+	}).Get(&v)
 
 	return starlark.Float(v), nil
 }

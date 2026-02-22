@@ -18,11 +18,19 @@ import (
 type Plugin interface {
 	// ID returns the unique plugin identifier (e.g., "json", "time", "request").
 	ID() string
-
+	
 	// Module creates a new Starlark module instance for this plugin.
 	// The module is created per-execution and receives context and runtime info.
 	// The ctx parameter may be either context.Context or workflow.Context (from Temporal).
 	Module(ctx any, info RunInfo) starlark.Value
+}
+
+// Registrar is an optional interface that plugins can implement to register
+// their Temporal activities with a worker.
+type Registrar interface {
+	// RegisterActivities registers all activities used by this plugin.
+	// The registerFn is typically worker.RegisterActivity from a Temporal worker.
+	RegisterActivities(registerFn func(activity any))
 }
 
 // RunInfo provides contextual information about the current script execution.
@@ -50,22 +58,33 @@ func NewRunner(plugins []Plugin, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.Default()
 	}
-
+	
 	pluginMap := make(map[string]Plugin, len(plugins))
 	for _, p := range plugins {
 		pluginMap[p.ID()] = p
 	}
-
+	
 	// Builtins available to all scripts
 	builtins := starlark.StringDict{
 		"CallableObject": star.CallableObjectConstructor,
 		"Dataclass":      star.DataclassConstructor,
 	}
-
+	
 	return &Runner{
 		plugins:  pluginMap,
 		logger:   logger,
 		builtins: builtins,
+	}
+}
+
+// RegisterActivities registers all activities from plugins that implement the Registrar interface.
+// The registerFn is typically worker.RegisterActivity from a Temporal worker.
+// This should be called during worker setup before starting the worker.
+func (r *Runner) RegisterActivities(registerFn func(activity any)) {
+	for _, plugin := range r.plugins {
+		if registrar, ok := plugin.(Registrar); ok {
+			registrar.RegisterActivities(registerFn)
+		}
 	}
 }
 
@@ -108,6 +127,15 @@ func (r *Runner) run(ctx any, fs star.FS, path, function string, args ...any) (r
 
 	// Setup workflow backend based on environment
 	backend, workflowCtx := r.setupWorkflowBackend(ctx, info)
+	
+	// Wrap logger with replay-aware handler to suppress logs during replay
+	replayAwareLogger := slog.New(workflow.NewReplayAwareHandler(
+		r.logger.Handler(),
+		func() bool { return backend.IsReplaying() },
+	))
+	
+	// Update info with replay-aware logger
+	info.Logger = replayAwareLogger
 
 	// Initialize plugin modules with the appropriate context
 	pluginModules := starlark.StringDict{}
@@ -119,7 +147,7 @@ func (r *Runner) run(ctx any, fs star.FS, path, function string, args ...any) (r
 	thread := &starlark.Thread{
 		Name: "safeclaw",
 		Print: func(_ *starlark.Thread, msg string) {
-			r.logger.Info(msg)
+			replayAwareLogger.Info(msg)
 		},
 	}
 
@@ -137,7 +165,7 @@ func (r *Runner) run(ctx any, fs star.FS, path, function string, args ...any) (r
 	thread.SetLocal("ctx", stdCtx)
 	thread.SetLocal("workflow_ctx", workflowCtx)
 	thread.SetLocal("workflow_backend", backend)
-	thread.SetLocal("logger", r.logger)
+	thread.SetLocal("logger", replayAwareLogger)
 
 	// Fix Bug 4: Store atexit module in thread-local storage for register/unregister functions
 	if atexitModule, ok := pluginModules["atexit"]; ok {

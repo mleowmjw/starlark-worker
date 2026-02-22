@@ -1,15 +1,12 @@
 package concurrent
 
 import (
-	"context"
-
 	"fmt"
-	"sync"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/workflow"
 	"go.starlark.net/starlark"
-	"golang.org/x/sync/errgroup"
 )
 
 type plugin struct{}
@@ -21,21 +18,14 @@ func (p *plugin) ID() string {
 }
 
 func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
-	// Extract the standard context if possible
-	var stdCtx context.Context
-	if c, ok := ctx.(context.Context); ok {
-		stdCtx = c
-	} else {
-		stdCtx = context.Background()
-	}
-
+	backend := workflow.GetBackend(ctx)
 	return &Module{
-		ctx: stdCtx,
+		backend: backend,
 	}
 }
 
 type Module struct {
-	ctx context.Context
+	backend workflow.Backend
 }
 
 var _ starlark.HasAttrs = &Module{}
@@ -56,19 +46,17 @@ var builtins = map[string]*starlark.Builtin{
 
 var properties = map[string]star.PropertyFactory{}
 
-func run(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	fn := args[0]
+func run(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	receiver := fn.Receiver().(*Module)
+	callFn := args[0]
 	callArgs := args[1:]
 
-	// Create a future backed by a goroutine
-	future := &Future{
-		done: make(chan struct{}),
-	}
+	// Create a future using the backend
+	future, settable := receiver.backend.NewFuture()
 
-	go func() {
-		defer close(future.done)
-
-		// Create a new thread for the goroutine
+	// Execute asynchronously using backend.Go
+	receiver.backend.Go(func() {
+		// Create a new thread for the concurrent execution
 		subThread := &starlark.Thread{
 			Name:  "concurrent",
 			Print: t.Print,
@@ -76,20 +64,18 @@ func run(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []
 		// Copy thread-local storage
 		subThread.SetLocal("ctx", t.Local("ctx"))
 		subThread.SetLocal("logger", t.Local("logger"))
+		subThread.SetLocal("workflow_backend", t.Local("workflow_backend"))
 
-		result, err := starlark.Call(subThread, fn, callArgs, kwargs)
-		future.mu.Lock()
-		future.result = result
-		future.err = err
-		future.mu.Unlock()
-	}()
+		result, err := starlark.Call(subThread, callFn, callArgs, kwargs)
+		settable.Set(result, err)
+	})
 
-	return future, nil
+	return &Future{future: future}, nil
 }
 
-func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func batchRun(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	logger := safeclaw.GetLogger(t)
-	ctx := safeclaw.GetContext(t) // Fix Bug 3: Get the actual execution context
+	receiver := fn.Receiver().(*Module)
 
 	var callablesList *starlark.List
 	var maxConcurrency int
@@ -116,60 +102,43 @@ func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 		maxConcurrency = len(callables)
 	}
 
-	// Create a batch future
-	batchFuture := &BatchFuture{
-		futures: make([]*Future, len(callables)),
-		done:    make(chan struct{}),
+	// Create futures for each callable
+	futures := make([]workflow.Future, len(callables))
+	settables := make([]workflow.Settable, len(callables))
+	for i := range callables {
+		futures[i], settables[i] = receiver.backend.NewFuture()
 	}
 
-	// Use errgroup for controlled concurrency with the actual context
-	g, gCtx := errgroup.WithContext(ctx) // Fix Bug 3: Use the actual context for cancellation propagation
-	g.SetLimit(maxConcurrency)
+	// Semaphore for concurrency control
+	sem := make(chan struct{}, maxConcurrency)
 
+	// Launch goroutines using backend.Go
 	for i, callableObj := range callables {
+		i := i
+		callableObj := callableObj
+		
+		receiver.backend.Go(func() {
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-		future := &Future{
-			done: make(chan struct{}),
-		}
-		batchFuture.futures[i] = future
-
-		g.Go(func() error {
-			defer close(future.done)
-
-			// Check if context is cancelled before starting work
-			if err := gCtx.Err(); err != nil {
-				future.mu.Lock()
-				future.err = err
-				future.mu.Unlock()
-				return nil
-			}
-
-			// Create a new thread for the goroutine
+			// Create a new thread for the concurrent execution
 			subThread := &starlark.Thread{
 				Name:  "concurrent",
 				Print: t.Print,
 			}
-			// Use the errgroup context for cancellation propagation
-			subThread.SetLocal("ctx", gCtx)
+			// Copy thread-local storage
+			subThread.SetLocal("ctx", t.Local("ctx"))
 			subThread.SetLocal("logger", t.Local("logger"))
+			subThread.SetLocal("workflow_backend", t.Local("workflow_backend"))
 
 			result, err := starlark.Call(subThread, callableObj.Fn, callableObj.Args, nil)
-			future.mu.Lock()
-			future.result = result
-			future.err = err
-			future.mu.Unlock()
-
-			return nil // We store errors in the future, not in errgroup
+			settables[i].Set(result, err)
 		})
 	}
 
-	// Wait for all goroutines to complete in a separate goroutine
-	go func() {
-		g.Wait()
-		close(batchFuture.done)
-	}()
-
-	return batchFuture, nil
+	// Wrap futures in BatchFuture
+	return &BatchFuture{futures: futures}, nil
 }
 
 func newCallable(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -186,12 +155,9 @@ func newCallable(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, k
 	}, nil
 }
 
-// Future represents an asynchronous result
+// Future wraps a workflow.Future for Starlark access.
 type Future struct {
-	mu     sync.Mutex
-	done   chan struct{}
-	result starlark.Value
-	err    error
+	future workflow.Future
 }
 
 var _ starlark.Value = &Future{}
@@ -219,31 +185,23 @@ func (f *Future) AttrNames() []string {
 }
 
 func (f *Future) resultMethod(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	// Wait for the future to complete
-	<-f.done
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	if f.err != nil {
-		return nil, f.err
+	var result starlark.Value
+	if err := f.future.Get(&result); err != nil {
+		return nil, err
 	}
-	return f.result, nil
+	return result, nil
 }
 
 func (f *Future) isReadyMethod(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	select {
-	case <-f.done:
+	if f.future.IsReady() {
 		return starlark.True, nil
-	default:
-		return starlark.False, nil
 	}
+	return starlark.False, nil
 }
 
 // BatchFuture represents multiple futures
 type BatchFuture struct {
-	futures []*Future
-	done    chan struct{}
+	futures []workflow.Future
 }
 
 var _ starlark.Value = &BatchFuture{}
@@ -271,31 +229,24 @@ func (b *BatchFuture) AttrNames() []string {
 }
 
 func (b *BatchFuture) resultMethod(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	// Wait for all futures to complete
-	<-b.done
-
 	results := make([]starlark.Value, len(b.futures))
 	for i, future := range b.futures {
-		<-future.done
-		future.mu.Lock()
-		if future.err != nil {
-			future.mu.Unlock()
-			return nil, future.err
+		var result starlark.Value
+		if err := future.Get(&result); err != nil {
+			return nil, err
 		}
-		results[i] = future.result
-		future.mu.Unlock()
+		results[i] = result
 	}
-
 	return starlark.NewList(results), nil
 }
 
 func (b *BatchFuture) isReadyMethod(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	select {
-	case <-b.done:
-		return starlark.True, nil
-	default:
-		return starlark.False, nil
+	for _, future := range b.futures {
+		if !future.IsReady() {
+			return starlark.False, nil
+		}
 	}
+	return starlark.True, nil
 }
 
 // Callable wraps a function and its arguments

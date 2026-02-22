@@ -14,8 +14,17 @@ type plugin struct{}
 
 var Plugin safeclaw.Plugin = &plugin{}
 
+var _ safeclaw.Registrar = (*plugin)(nil)
+
 func (p *plugin) ID() string {
 	return "script"
+}
+
+// RegisterActivities registers the script execution activities with the Temporal worker.
+func (p *plugin) RegisterActivities(registerFn func(activity any)) {
+	registerFn(ScriptExecActivity)
+	registerFn(ScriptFileActivity)
+	registerFn(PipeExecActivity)
 }
 
 func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
@@ -58,26 +67,20 @@ func _exec(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs
 		return nil, err
 	}
 
-	if receiver.backend != nil && receiver.backend.InWorkflow() {
-		// Execute via activity in workflow mode
-		var output ScriptOutput
-		err := receiver.backend.ExecuteActivity(ScriptExecActivity, ScriptExecInput{
-			Command: command.GoString(),
-		}).Get(&output)
-		if err != nil {
-			logger.Error("script.exec: activity failed", "error", err)
-			return nil, err
-		}
-		if output.Error != "" {
-			return nil, fmt.Errorf("script exec failed: %s", output.Error)
-		}
-		// Return a pipe with the result
-		pipe := script.Echo(string(output.Data))
-		return &Pipe{pipe: pipe, backend: receiver.backend}, nil
+	// Execute via activity (works for both local and workflow backends)
+	var output ScriptOutput
+	err := receiver.backend.ExecuteActivity(ScriptExecActivity, ScriptExecInput{
+		Command: command.GoString(),
+	}).Get(&output)
+	if err != nil {
+		logger.Error("script.exec: activity failed", "error", err)
+		return nil, err
 	}
-
-	// Direct execution (dev mode)
-	pipe := script.Exec(command.GoString())
+	if output.Error != "" {
+		return nil, fmt.Errorf("script exec failed: %s", output.Error)
+	}
+	// Return a pipe with the result
+	pipe := script.Echo(string(output.Data))
 	return &Pipe{pipe: pipe, backend: receiver.backend}, nil
 }
 
@@ -91,26 +94,20 @@ func _file(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs
 		return nil, err
 	}
 
-	if receiver.backend != nil && receiver.backend.InWorkflow() {
-		// Execute via activity in workflow mode
-		var output ScriptOutput
-		err := receiver.backend.ExecuteActivity(ScriptFileActivity, ScriptFileInput{
-			Path: path.GoString(),
-		}).Get(&output)
-		if err != nil {
-			logger.Error("script.file: activity failed", "error", err)
-			return nil, err
-		}
-		if output.Error != "" {
-			return nil, fmt.Errorf("script file failed: %s", output.Error)
-		}
-		// Return a pipe with the result
-		pipe := script.Echo(string(output.Data))
-		return &Pipe{pipe: pipe, backend: receiver.backend}, nil
+	// Execute via activity (works for both local and workflow backends)
+	var output ScriptOutput
+	err := receiver.backend.ExecuteActivity(ScriptFileActivity, ScriptFileInput{
+		Path: path.GoString(),
+	}).Get(&output)
+	if err != nil {
+		logger.Error("script.file: activity failed", "error", err)
+		return nil, err
 	}
-
-	// Direct execution (dev mode)
-	pipe := script.File(path.GoString())
+	if output.Error != "" {
+		return nil, fmt.Errorf("script file failed: %s", output.Error)
+	}
+	// Return a pipe with the result
+	pipe := script.Echo(string(output.Data))
 	return &Pipe{pipe: pipe, backend: receiver.backend}, nil
 }
 

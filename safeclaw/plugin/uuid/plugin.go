@@ -69,15 +69,9 @@ func (m *Module) uuid4(t *starlark.Thread, fn *starlark.Builtin, args starlark.T
 	}
 
 	var stringUUID string
-	if m.backend != nil && m.backend.InWorkflow() {
-		// Use workflow SideEffect for deterministic replay
-		m.backend.SideEffect(func() any {
-			return uuid.New().String()
-		}).Get(&stringUUID)
-	} else {
-		// Direct execution (dev mode)
-		stringUUID = uuid.New().String()
-	}
+	m.backend.SideEffect(func() any {
+		return uuid.New().String()
+	}).Get(&stringUUID)
 
 	return &UUID{StringUUID: starlark.String(stringUUID)}, nil
 }

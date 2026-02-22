@@ -58,45 +58,20 @@ func execSQL(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwar
 		return nil, err
 	}
 
-	if receiver.backend != nil && receiver.backend.InWorkflow() {
-		// Execute via activity in workflow mode
-		var output SQLExecOutput
-		err := receiver.backend.ExecuteActivity(SQLExecActivity, SQLExecInput{
-			DBPath: dbPath.GoString(),
-			SQL:    sqlStmt.GoString(),
-		}).Get(&output)
-		if err != nil {
-			logger.Error("sqlite.exec: activity failed", "error", err)
-			return nil, err
-		}
-
-		out := starlark.NewDict(2)
-		_ = out.SetKey(starlark.String("rows_affected"), starlark.MakeInt64(output.RowsAffected))
-		_ = out.SetKey(starlark.String("last_insert_id"), starlark.MakeInt64(output.LastInsertID))
-		return out, nil
-	}
-
-	// Direct execution (dev mode)
-	db, err := openDB(dbPath.GoString())
+	// Execute via activity (works for both local and workflow backends)
+	var output SQLExecOutput
+	err := receiver.backend.ExecuteActivity(SQLExecActivity, SQLExecInput{
+		DBPath: dbPath.GoString(),
+		SQL:    sqlStmt.GoString(),
+	}).Get(&output)
 	if err != nil {
-		logger.Error("sqlite.exec: open db failed", "error", err)
+		logger.Error("sqlite.exec: activity failed", "error", err)
 		return nil, err
 	}
-	defer db.Close()
-
-	ctx := safeclaw.GetContext(t)
-	res, err := db.ExecContext(ctx, sqlStmt.GoString())
-	if err != nil {
-		logger.Error("sqlite.exec: exec failed", "error", err)
-		return nil, err
-	}
-
-	rows, _ := res.RowsAffected()
-	lastID, _ := res.LastInsertId()
 
 	out := starlark.NewDict(2)
-	_ = out.SetKey(starlark.String("rows_affected"), starlark.MakeInt64(rows))
-	_ = out.SetKey(starlark.String("last_insert_id"), starlark.MakeInt64(lastID))
+	_ = out.SetKey(starlark.String("rows_affected"), starlark.MakeInt64(output.RowsAffected))
+	_ = out.SetKey(starlark.String("last_insert_id"), starlark.MakeInt64(output.LastInsertID))
 	return out, nil
 }
 
@@ -110,74 +85,25 @@ func querySQL(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwa
 		return nil, err
 	}
 
-	if receiver.backend != nil && receiver.backend.InWorkflow() {
-		// Execute via activity in workflow mode
-		var output SQLQueryOutput
-		err := receiver.backend.ExecuteActivity(SQLQueryActivity, SQLQueryInput{
-			DBPath: dbPath.GoString(),
-			SQL:    sqlStmt.GoString(),
-		}).Get(&output)
-		if err != nil {
-			logger.Error("sqlite.query: activity failed", "error", err)
-			return nil, err
-		}
-
-		result := starlark.NewList(nil)
-		for _, row := range output.Rows {
-			rowDict := starlark.NewDict(len(output.Columns))
-			for i, name := range output.Columns {
-				_ = rowDict.SetKey(starlark.String(name), toStarlarkValue(row[i]))
-			}
-			result.Append(rowDict)
-		}
-		return result, nil
-	}
-
-	// Direct execution (dev mode)
-	db, err := openDB(dbPath.GoString())
+	// Execute via activity (works for both local and workflow backends)
+	var output SQLQueryOutput
+	err := receiver.backend.ExecuteActivity(SQLQueryActivity, SQLQueryInput{
+		DBPath: dbPath.GoString(),
+		SQL:    sqlStmt.GoString(),
+	}).Get(&output)
 	if err != nil {
-		logger.Error("sqlite.query: open db failed", "error", err)
-		return nil, err
-	}
-	defer db.Close()
-
-	ctx := safeclaw.GetContext(t)
-	rows, err := db.QueryContext(ctx, sqlStmt.GoString())
-	if err != nil {
-		logger.Error("sqlite.query: query failed", "error", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	cols, err := rows.Columns()
-	if err != nil {
-		logger.Error("sqlite.query: columns failed", "error", err)
+		logger.Error("sqlite.query: activity failed", "error", err)
 		return nil, err
 	}
 
 	result := starlark.NewList(nil)
-	for rows.Next() {
-		values := make([]any, len(cols))
-		scanArgs := make([]any, len(cols))
-		for i := range values {
-			scanArgs[i] = &values[i]
-		}
-		if err := rows.Scan(scanArgs...); err != nil {
-			logger.Error("sqlite.query: scan failed", "error", err)
-			return nil, err
-		}
-
-		rowDict := starlark.NewDict(len(cols))
-		for i, name := range cols {
-			_ = rowDict.SetKey(starlark.String(name), toStarlarkValue(values[i]))
+	for _, row := range output.Rows {
+		rowDict := starlark.NewDict(len(output.Columns))
+		for i, name := range output.Columns {
+			_ = rowDict.SetKey(starlark.String(name), toStarlarkValue(row[i]))
 		}
 		result.Append(rowDict)
 	}
-	if err := rows.Err(); err != nil {
-		logger.Error("sqlite.query: rows error", "error", err)
-		return nil, err
-	}
-
 	return result, nil
 }
 
