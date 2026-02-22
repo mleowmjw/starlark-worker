@@ -85,7 +85,7 @@ func querySQL(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 	return result, nil
 }
 
-func toStarlarkValue(v interface{}) starlark.Value {
+func toStarlarkValue(v any) starlark.Value {
 	switch t := v.(type) {
 	case nil:
 		return starlark.None

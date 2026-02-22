@@ -133,7 +133,7 @@ func Decode(line []byte, out any) (err error) {
 		}
 	default:
 		_out = _out.Elem()
-		starlarkValueType := reflect.TypeOf((*starlark.Value)(nil)).Elem()
+		starlarkValueType := reflect.TypeFor[starlark.Value]()
 		if !_out.Type().AssignableTo(starlarkValueType) {
 			return UnsupportedTypeError(
 				fmt.Errorf("unsupported output type: expected: %v assignable, actual: %v", starlarkValueType, _out.Type()),
@@ -269,7 +269,7 @@ func ToStarlark(v any) (starlark.Value, error) {
 	if v == nil {
 		return starlark.None, nil
 	}
-	
+
 	switch val := v.(type) {
 	case starlark.Value:
 		return val, nil
