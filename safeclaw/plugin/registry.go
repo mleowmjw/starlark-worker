@@ -3,6 +3,7 @@ package plugin
 import (
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/atexit"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/chameleon"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/concurrent"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/hashlib"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/plugin/json"
@@ -22,6 +23,7 @@ import (
 func DefaultPlugins() []safeclaw.Plugin {
 	return []safeclaw.Plugin{
 		atexit.Plugin,
+		chameleon.Plugin,
 		concurrent.Plugin,
 		hashlib.Plugin,
 		json.Plugin,
