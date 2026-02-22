@@ -19,7 +19,7 @@ func JP[T any](obj any, path string) (T, error) {
 		path = path[1:]
 	}
 	var res = obj
-	for _, f := range strings.Split(path, ".") {
+	for f := range strings.SplitSeq(path, ".") {
 		if f == "" {
 			continue
 		}

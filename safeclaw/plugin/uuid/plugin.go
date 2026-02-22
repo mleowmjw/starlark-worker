@@ -3,6 +3,7 @@ package uuid
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
@@ -63,7 +64,7 @@ var _ starlark.HasAttrs = &UUID{}
 
 func (u *UUID) String() string        { return string(u.StringUUID) }
 func (u *UUID) Type() string          { return "uuid" }
-func (u *UUID) Freeze()                {}
+func (u *UUID) Freeze()               {}
 func (u *UUID) Truth() starlark.Bool  { return true }
 func (u *UUID) Hash() (uint32, error) { return u.StringUUID.Hash() }
 
@@ -71,13 +72,13 @@ func (u *UUID) Attr(name string) (starlark.Value, error) {
 	switch name {
 	case "hex":
 		// Remove hyphens from the UUID string
-		hex := ""
+		var hex strings.Builder
 		for _, c := range string(u.StringUUID) {
 			if c != '-' {
-				hex += string(c)
+				hex.WriteString(string(c))
 			}
 		}
-		return starlark.String(hex), nil
+		return starlark.String(hex.String()), nil
 	case "urn":
 		return starlark.String("urn:uuid:" + string(u.StringUUID)), nil
 	default:

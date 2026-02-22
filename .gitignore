@@ -40,3 +40,7 @@ mise.local.toml
 
 # Ignore binary
 starlark-worker
+
+# Ignore cursor metadata
+.cursor
+

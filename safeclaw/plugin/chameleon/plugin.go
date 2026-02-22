@@ -226,7 +226,7 @@ func _call(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs
 	}
 
 	// Parse JSON result and convert to Starlark
-	var result interface{}
+	var result any
 	if err := json.Unmarshal(methodData, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse method result: %w", err)
 	}
@@ -262,7 +262,7 @@ func _getMockData(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple,
 		return starlark.None, nil
 	}
 
-	var result interface{}
+	var result any
 	if err := json.Unmarshal(data, &result); err != nil {
 		return starlark.None, nil
 	}

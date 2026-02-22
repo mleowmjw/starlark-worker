@@ -95,8 +95,8 @@ func querySQL(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 
 	result := starlark.NewList(nil)
 	for rows.Next() {
-		values := make([]interface{}, len(cols))
-		scanArgs := make([]interface{}, len(cols))
+		values := make([]any, len(cols))
+		scanArgs := make([]any, len(cols))
 		for i := range values {
 			scanArgs[i] = &values[i]
 		}
@@ -137,7 +137,7 @@ func ensureDir(dbPath string) error {
 	return os.MkdirAll(dir, 0o755)
 }
 
-func toStarlarkValue(v interface{}) starlark.Value {
+func toStarlarkValue(v any) starlark.Value {
 	switch t := v.(type) {
 	case nil:
 		return starlark.None
