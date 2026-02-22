@@ -1,7 +1,6 @@
 package os
 
 import (
-
 	"fmt"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
@@ -17,7 +16,7 @@ func (p *plugin) ID() string {
 	return "os"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	environ := starlark.NewDict(len(info.Environ))
 	for k, v := range info.Environ {
 		environ.SetKey(starlark.String(k), starlark.String(v))

@@ -1,9 +1,9 @@
 package request
 
 import (
-	"context"
 	"bufio"
 	"bytes"
+	"context"
 
 	"fmt"
 	"io"
@@ -23,9 +23,9 @@ func (p *plugin) ID() string {
 	return "request"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	backend := workflow.GetBackend(ctx)
-	
+
 	// Extract the standard context if possible
 	var stdCtx context.Context
 	if c, ok := ctx.(context.Context); ok {
@@ -33,7 +33,7 @@ func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
 	} else {
 		stdCtx = context.Background()
 	}
-	
+
 	return &Module{
 		client:  http.DefaultClient,
 		ctx:     stdCtx,
@@ -105,7 +105,7 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 			for _, item := range dict.Items() {
 				key := item[0].(starlark.String).GoString()
 				value := item[1]
-				
+
 				// Handle both string and list of strings
 				switch v := value.(type) {
 				case starlark.String:
@@ -130,14 +130,14 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 			Body:    bodyBytes,
 			Headers: headerMap,
 		}
-		
+
 		var output HTTPRequestOutput
 		err := module.backend.ExecuteActivity(HTTPRequestActivity, input).Get(&output)
 		if err != nil {
 			logger.Error("request.do: activity failed", "error", err)
 			return nil, fmt.Errorf("activity failed: %w", err)
 		}
-		
+
 		// Convert output to Response
 		return activityOutputToResponse(output)
 	}
@@ -147,13 +147,13 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 	if len(bodyBytes) > 0 {
 		br = bytes.NewBuffer(bodyBytes)
 	}
-	
+
 	req, err := http.NewRequestWithContext(module.ctx, method.GoString(), url.GoString(), br)
 	if err != nil {
 		logger.Error("request.do: failed to create request", "error", err)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	req.Header = http.Header(headerMap)
 
 	// Execute the request
@@ -189,7 +189,7 @@ func activityOutputToResponse(output HTTPRequestOutput) (starlark.Value, error) 
 		Header:     http.Header(output.Headers),
 		Body:       io.NopCloser(bytes.NewReader(output.Body)),
 	}
-	
+
 	return &Response{
 		Response:  res,
 		bodyCache: output.Body,
@@ -199,9 +199,9 @@ func activityOutputToResponse(output HTTPRequestOutput) (starlark.Value, error) 
 
 // Response wraps http.Response for Starlark
 type Response struct {
-	Response   *http.Response
-	bodyCache  []byte // Fix Bug 2: Cache the body so it can be read multiple times
-	bodyRead   bool
+	Response  *http.Response
+	bodyCache []byte // Fix Bug 2: Cache the body so it can be read multiple times
+	bodyRead  bool
 }
 
 var _ starlark.Value = &Response{}
@@ -209,7 +209,7 @@ var _ starlark.HasAttrs = &Response{}
 
 func (r *Response) String() string        { return fmt.Sprintf("<Response %d>", r.Response.StatusCode) }
 func (r *Response) Type() string          { return "Response" }
-func (r *Response) Freeze()                {}
+func (r *Response) Freeze()               {}
 func (r *Response) Truth() starlark.Bool  { return true }
 func (r *Response) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: Response") }
 

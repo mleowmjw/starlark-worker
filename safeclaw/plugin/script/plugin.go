@@ -1,7 +1,6 @@
 package script
 
 import (
-
 	"fmt"
 
 	"github.com/bitfield/script"
@@ -19,14 +18,14 @@ func (p *plugin) ID() string {
 	return "script"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	backend := workflow.GetBackend(ctx)
 	return &Module{
 		backend: backend,
 	}
 }
 
-type Module struct{
+type Module struct {
 	backend workflow.Backend
 }
 
@@ -146,7 +145,7 @@ var _ starlark.HasAttrs = &Pipe{}
 
 func (p *Pipe) String() string        { return "<Pipe>" }
 func (p *Pipe) Type() string          { return "Pipe" }
-func (p *Pipe) Freeze()                {}
+func (p *Pipe) Freeze()               {}
 func (p *Pipe) Truth() starlark.Bool  { return true }
 func (p *Pipe) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: Pipe") }
 
@@ -194,7 +193,7 @@ func (p *Pipe) linesMethod(t *starlark.Thread, fn *starlark.Builtin, args starla
 	if err != nil {
 		return nil, err
 	}
-	
+
 	lines := make([]starlark.Value, len(result))
 	for i, line := range result {
 		lines[i] = starlark.String(line)

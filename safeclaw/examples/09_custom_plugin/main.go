@@ -18,7 +18,7 @@ func (p *CustomPlugin) ID() string {
 	return "custom"
 }
 
-func (p *CustomPlugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *CustomPlugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	return &CustomModule{}
 }
 
@@ -29,7 +29,7 @@ var _ starlark.HasAttrs = &CustomModule{}
 
 func (m *CustomModule) String() string        { return "custom" }
 func (m *CustomModule) Type() string          { return "custom" }
-func (m *CustomModule) Freeze()                {}
+func (m *CustomModule) Freeze()               {}
 func (m *CustomModule) Truth() starlark.Bool  { return true }
 func (m *CustomModule) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: custom") }
 

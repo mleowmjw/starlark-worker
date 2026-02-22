@@ -12,18 +12,18 @@ import (
 
 // ToolSpec defines a tool that an agent can execute
 type ToolSpec struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Script      string                 `json:"script"`
-	Function    string                 `json:"function"`
-	Args        map[string]interface{} `json:"args"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Script      string         `json:"script"`
+	Function    string         `json:"function"`
+	Args        map[string]any `json:"args"`
 }
 
 // ToolResult is the structured output from tool execution
 type ToolResult struct {
-	Success bool        `json:"success"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   string      `json:"error,omitempty"`
+	Success bool   `json:"success"`
+	Result  any    `json:"result,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // AgentToolExecutor runs tools in a sandboxed Starlark environment
@@ -39,7 +39,7 @@ func NewAgentToolExecutor() *AgentToolExecutor {
 
 func (e *AgentToolExecutor) Execute(ctx context.Context, spec ToolSpec) ToolResult {
 	// Convert args to Starlark-compatible format
-	var args []interface{}
+	var args []any
 	for _, v := range spec.Args {
 		args = append(args, v)
 	}
@@ -54,7 +54,7 @@ func (e *AgentToolExecutor) Execute(ctx context.Context, spec ToolSpec) ToolResu
 	}
 
 	// Convert result back to Go
-	var goResult interface{}
+	var goResult any
 	if str, ok := result.(starlark.String); ok {
 		goResult = string(str)
 	} else {
@@ -92,7 +92,7 @@ def fetch_and_parse(url):
     }
 `,
 		Function: "fetch_and_parse",
-		Args: map[string]interface{}{
+		Args: map[string]any{
 			"url": "https://api.github.com/repos/google/starlark-go",
 		},
 	}

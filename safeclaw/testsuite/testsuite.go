@@ -24,10 +24,10 @@ type WorkflowTestEnvironment struct {
 // NewTestEnvironment creates a new test environment for safeclaw with Temporal.
 func (s *WorkflowTestSuite) NewTestEnvironment(t *testing.T, plugins []safeclaw.Plugin) *WorkflowTestEnvironment {
 	env := s.NewTestWorkflowEnvironment()
-	
+
 	// Create safeclaw runner
 	runner := safeclaw.NewRunner(plugins, nil)
-	
+
 	return &WorkflowTestEnvironment{
 		env:    env,
 		runner: runner,
@@ -35,7 +35,7 @@ func (s *WorkflowTestSuite) NewTestEnvironment(t *testing.T, plugins []safeclaw.
 }
 
 // ExecuteScript executes a safeclaw script as a Temporal workflow.
-func (e *WorkflowTestEnvironment) ExecuteScript(source []byte, function string, args ...interface{}) {
+func (e *WorkflowTestEnvironment) ExecuteScript(source []byte, function string, args ...any) {
 	workflowFunc := func(ctx temp.Context) (string, error) {
 		// The runner will detect the Temporal context and set up the backend automatically
 		// Pass ctx as interface{} to satisfy the new signature
@@ -46,7 +46,7 @@ func (e *WorkflowTestEnvironment) ExecuteScript(source []byte, function string, 
 		// Serialize starlark.Value to string for Temporal
 		return result.String(), nil
 	}
-	
+
 	e.env.ExecuteWorkflow(workflowFunc)
 }
 
@@ -55,14 +55,14 @@ func (e *WorkflowTestEnvironment) ExecuteScript(source []byte, function string, 
 func (e *WorkflowTestEnvironment) GetResult(t *testing.T) string {
 	require.True(t, e.env.IsWorkflowCompleted())
 	require.NoError(t, e.env.GetWorkflowError())
-	
+
 	var result string
 	require.NoError(t, e.env.GetWorkflowResult(&result))
 	return result
 }
 
 // OnActivity mocks an activity for testing.
-func (e *WorkflowTestEnvironment) OnActivity(activity interface{}, args ...interface{}) *temptestsuite.MockCallWrapper {
+func (e *WorkflowTestEnvironment) OnActivity(activity any, args ...any) *temptestsuite.MockCallWrapper {
 	return e.env.OnActivity(activity, args...)
 }
 
@@ -72,7 +72,7 @@ func (e *WorkflowTestEnvironment) AssertExpectations(t *testing.T) {
 }
 
 // RegisterActivity registers an activity with the test environment.
-func (e *WorkflowTestEnvironment) RegisterActivity(activity interface{}) {
+func (e *WorkflowTestEnvironment) RegisterActivity(activity any) {
 	e.env.RegisterActivity(activity)
 }
 

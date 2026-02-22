@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
+	"maps"
 )
 
 const DataclassType = "dataclass"
@@ -27,9 +28,7 @@ var _ Dataclass = (*_Dataclass)(nil)
 
 func NewDataclass(attrs starlark.StringDict) Dataclass {
 	attrsCopy := starlark.StringDict{}
-	for k, v := range attrs {
-		attrsCopy[k] = v
-	}
+	maps.Copy(attrsCopy, attrs)
 	if _, found := attrsCopy[codecAttr]; !found {
 		attrsCopy[codecAttr] = starlark.String(DataclassType)
 	}

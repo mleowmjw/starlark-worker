@@ -17,30 +17,30 @@ type Backend interface {
 	Sleep(d time.Duration) error
 
 	// SideEffect records non-deterministic values for replay.
-	SideEffect(f func() interface{}) EncodedValue
+	SideEffect(f func() any) EncodedValue
 
 	// ExecuteActivity executes an activity and returns a future.
-	ExecuteActivity(activity interface{}, args ...interface{}) Future
+	ExecuteActivity(activity any, args ...any) Future
 }
 
 // EncodedValue represents an encoded value that can be retrieved.
 type EncodedValue interface {
-	Get(valuePtr interface{}) error
+	Get(valuePtr any) error
 }
 
 // Future represents an asynchronous result.
 type Future interface {
-	Get(valuePtr interface{}) error
+	Get(valuePtr any) error
 	IsReady() bool
 }
 
 // GetBackend retrieves the workflow backend from the context.
 // Returns nil if no backend is attached.
 // Works with both standard context.Context and Temporal's workflow.Context.
-func GetBackend(ctx interface{}) Backend {
+func GetBackend(ctx any) Backend {
 	// Try to get the value using the Value method (works for both types)
 	type valuer interface {
-		Value(key interface{}) interface{}
+		Value(key any) any
 	}
 	if v, ok := ctx.(valuer); ok {
 		if backend, ok := v.Value("safeclaw.workflow.backend").(Backend); ok {

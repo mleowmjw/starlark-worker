@@ -1,7 +1,6 @@
 package atexit
 
 import (
-
 	"fmt"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
@@ -17,7 +16,7 @@ func (p *plugin) ID() string {
 	return "atexit"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	return &Module{
 		hooks: &ExitHooks{},
 	}
@@ -50,7 +49,7 @@ func register(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 	if !ok {
 		return nil, fmt.Errorf("atexit module not found in thread")
 	}
-	
+
 	fn := args[0].(starlark.Callable)
 	args = args[1:]
 	module.hooks.Register(fn, args, kwargs)
@@ -63,7 +62,7 @@ func unregister(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ 
 	if !ok {
 		return nil, fmt.Errorf("atexit module not found in thread")
 	}
-	
+
 	fn := args[0].(starlark.Callable)
 	module.hooks.Unregister(fn)
 	return starlark.None, nil

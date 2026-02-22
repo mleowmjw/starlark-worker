@@ -26,7 +26,7 @@ type SQLQueryInput struct {
 // SQLQueryOutput contains the result of SQL query.
 type SQLQueryOutput struct {
 	Columns []string
-	Rows    [][]interface{}
+	Rows    [][]any
 }
 
 // SQLExecActivity executes a SQL statement as a Temporal activity.
@@ -70,10 +70,10 @@ func SQLQueryActivity(ctx context.Context, input SQLQueryInput) (*SQLQueryOutput
 		return nil, fmt.Errorf("columns failed: %w", err)
 	}
 
-	result := [][]interface{}{}
+	result := [][]any{}
 	for rows.Next() {
-		values := make([]interface{}, len(cols))
-		scanArgs := make([]interface{}, len(cols))
+		values := make([]any, len(cols))
+		scanArgs := make([]any, len(cols))
 		for i := range values {
 			scanArgs[i] = &values[i]
 		}

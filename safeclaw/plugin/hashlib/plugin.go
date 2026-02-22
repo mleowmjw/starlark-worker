@@ -1,7 +1,6 @@
 package hashlib
 
 import (
-
 	"fmt"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
@@ -18,7 +17,7 @@ func (p *plugin) ID() string {
 	return "hashlib"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	return &Module{}
 }
 

@@ -21,7 +21,7 @@ func (p *plugin) ID() string {
 	return "time"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	// Calculate delta for effective time (for backfill scenarios)
 	effectiveTime := info.StartTime
 	if timeStr, ok := info.Environ["STARLARK_TIME"]; ok {
@@ -30,10 +30,10 @@ func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
 		}
 	}
 	delta := effectiveTime.Sub(info.StartTime)
-	
+
 	// Get workflow backend from context
 	backend := workflow.GetBackend(ctx)
-	
+
 	// Extract the standard context if possible
 	var stdCtx context.Context
 	if c, ok := ctx.(context.Context); ok {
@@ -41,7 +41,7 @@ func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
 	} else {
 		stdCtx = context.Background()
 	}
-	
+
 	m := &Module{
 		delta:   delta,
 		backend: backend,
@@ -97,7 +97,7 @@ func _sleep(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwarg
 	}
 
 	duration := time.Duration(float64(time.Second) * sf)
-	
+
 	// Use workflow backend if available, otherwise direct execution
 	if receiver.backend != nil && receiver.backend.InWorkflow() {
 		if err := receiver.backend.Sleep(duration); err != nil {
@@ -106,12 +106,12 @@ func _sleep(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwarg
 		}
 		return starlark.None, nil
 	}
-	
+
 	// Direct execution (dev mode) - respect context cancellation
 	ctx := receiver.ctx
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
-	
+
 	select {
 	case <-timer.C:
 		return starlark.None, nil
@@ -124,36 +124,36 @@ func _sleep(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwarg
 // _time_ns returns time as an integer number of nanoseconds since the epoch.
 func _time_ns(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	receiver := fn.Receiver().(*Module)
-	
+
 	var ns int64
 	if receiver.backend != nil && receiver.backend.InWorkflow() {
 		// Use workflow-backed time (deterministic)
-		receiver.backend.SideEffect(func() interface{} {
+		receiver.backend.SideEffect(func() any {
 			return receiver.backend.Now().Add(receiver.delta).UnixNano()
 		}).Get(&ns)
 	} else {
 		// Direct execution (dev mode)
 		ns = time.Now().Add(receiver.delta).UnixNano()
 	}
-	
+
 	return starlark.MakeInt64(ns), nil
 }
 
 // _time returns the current unix time in seconds as floating point number.
 func _time(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	receiver := fn.Receiver().(*Module)
-	
+
 	var ns int64
 	if receiver.backend != nil && receiver.backend.InWorkflow() {
 		// Use workflow-backed time (deterministic)
-		receiver.backend.SideEffect(func() interface{} {
+		receiver.backend.SideEffect(func() any {
 			return receiver.backend.Now().Add(receiver.delta).UnixNano()
 		}).Get(&ns)
 	} else {
 		// Direct execution (dev mode)
 		ns = time.Now().Add(receiver.delta).UnixNano()
 	}
-	
+
 	sec := float64(ns) / 1e9
 	return starlark.Float(sec), nil
 }
@@ -189,18 +189,18 @@ func parseStarlarkTime(value string) (time.Time, error) {
 	if len(parts) != 2 {
 		return time.Time{}, fmt.Errorf("invalid STARLARK_TIME format: %s", value)
 	}
-	
+
 	scheme := parts[0]
 	rest := parts[1]
-	
+
 	if scheme != "unix" {
 		return time.Time{}, fmt.Errorf("unsupported STARLARK_TIME scheme: %s", scheme)
 	}
-	
+
 	var seconds int64
 	if _, err := fmt.Sscanf(rest, "%d", &seconds); err != nil {
 		return time.Time{}, fmt.Errorf("invalid STARLARK_TIME value: %s", rest)
 	}
-	
+
 	return time.Unix(seconds, 0), nil
 }

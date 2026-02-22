@@ -1,7 +1,6 @@
 package whatsapp
 
 import (
-
 	"fmt"
 	"sort"
 	"strings"
@@ -35,7 +34,7 @@ type plugin struct{}
 
 func (p *plugin) ID() string { return "whatsapp" }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	scenario := strings.TrimSpace(info.Environ["WHATSAPP_SCENARIO"])
 	if scenario == "" {
 		scenario = "mixed"
@@ -413,4 +412,3 @@ func mockData(m *Module) ([]chat, []message) {
 		return ch, msgs
 	}
 }
-

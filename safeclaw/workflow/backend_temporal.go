@@ -37,15 +37,15 @@ func (b *TemporalBackend) Sleep(d time.Duration) error {
 }
 
 // SideEffect records non-deterministic operations for replay.
-func (b *TemporalBackend) SideEffect(f func() interface{}) EncodedValue {
-	encoded := temp.SideEffect(b.ctx, func(ctx temp.Context) interface{} {
+func (b *TemporalBackend) SideEffect(f func() any) EncodedValue {
+	encoded := temp.SideEffect(b.ctx, func(ctx temp.Context) any {
 		return f()
 	})
 	return &temporalEncodedValue{value: encoded}
 }
 
 // ExecuteActivity executes a Temporal activity asynchronously.
-func (b *TemporalBackend) ExecuteActivity(activity interface{}, args ...interface{}) Future {
+func (b *TemporalBackend) ExecuteActivity(activity any, args ...any) Future {
 	// Set default activity options with timeouts
 	ctx := temp.WithActivityOptions(b.ctx, temp.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -62,7 +62,7 @@ type temporalEncodedValue struct {
 	value converter.EncodedValue
 }
 
-func (v *temporalEncodedValue) Get(valuePtr interface{}) error {
+func (v *temporalEncodedValue) Get(valuePtr any) error {
 	return v.value.Get(valuePtr)
 }
 
@@ -72,7 +72,7 @@ type temporalFuture struct {
 	ctx    temp.Context
 }
 
-func (f *temporalFuture) Get(valuePtr interface{}) error {
+func (f *temporalFuture) Get(valuePtr any) error {
 	return f.future.Get(f.ctx, valuePtr)
 }
 

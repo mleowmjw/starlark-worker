@@ -18,29 +18,29 @@ import (
 type Plugin interface {
 	// ID returns the unique plugin identifier (e.g., "json", "time", "request").
 	ID() string
-	
+
 	// Module creates a new Starlark module instance for this plugin.
 	// The module is created per-execution and receives context and runtime info.
 	// The ctx parameter may be either context.Context or workflow.Context (from Temporal).
-	Module(ctx interface{}, info RunInfo) starlark.Value
+	Module(ctx any, info RunInfo) starlark.Value
 }
 
 // RunInfo provides contextual information about the current script execution.
 type RunInfo struct {
 	// Environ contains environment variables available to the script.
 	Environ map[string]string
-	
+
 	// StartTime is when the script execution began.
 	StartTime time.Time
-	
+
 	// Logger is the structured logger for this execution.
 	Logger *slog.Logger
 }
 
 // Runner executes Starlark scripts with a set of registered plugins.
 type Runner struct {
-	plugins map[string]Plugin
-	logger  *slog.Logger
+	plugins  map[string]Plugin
+	logger   *slog.Logger
 	builtins starlark.StringDict
 }
 
@@ -50,18 +50,18 @@ func NewRunner(plugins []Plugin, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	
+
 	pluginMap := make(map[string]Plugin, len(plugins))
 	for _, p := range plugins {
 		pluginMap[p.ID()] = p
 	}
-	
+
 	// Builtins available to all scripts
 	builtins := starlark.StringDict{
 		"CallableObject": star.CallableObjectConstructor,
 		"Dataclass":      star.DataclassConstructor,
 	}
-	
+
 	return &Runner{
 		plugins:  pluginMap,
 		logger:   logger,
@@ -71,13 +71,13 @@ func NewRunner(plugins []Plugin, logger *slog.Logger) *Runner {
 
 // RunScript executes a function from a Starlark script in the given filesystem.
 // The ctx parameter may be either context.Context or workflow.Context (from Temporal).
-func (r *Runner) RunScript(ctx interface{}, fs star.FS, path, function string, args ...any) (starlark.Value, error) {
+func (r *Runner) RunScript(ctx any, fs star.FS, path, function string, args ...any) (starlark.Value, error) {
 	return r.run(ctx, fs, path, function, args...)
 }
 
 // RunTar executes a function from a Starlark script stored in a gzipped tar archive.
 // The ctx parameter may be either context.Context or workflow.Context (from Temporal).
-func (r *Runner) RunTar(ctx interface{}, tarData []byte, path, function string, args ...any) (starlark.Value, error) {
+func (r *Runner) RunTar(ctx any, tarData []byte, path, function string, args ...any) (starlark.Value, error) {
 	fs, err := star.NewTarFS(tarData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tar filesystem: %w", err)
@@ -88,7 +88,7 @@ func (r *Runner) RunTar(ctx interface{}, tarData []byte, path, function string, 
 // RunSource executes a function from inline Starlark source code.
 // The source is treated as a file named "main.star".
 // The ctx parameter may be either context.Context or workflow.Context (from Temporal).
-func (r *Runner) RunSource(ctx interface{}, source []byte, function string, args ...any) (starlark.Value, error) {
+func (r *Runner) RunSource(ctx any, source []byte, function string, args ...any) (starlark.Value, error) {
 	fs := star.NewMemoryFS(map[string][]byte{
 		"main.star": source,
 	})
@@ -96,25 +96,25 @@ func (r *Runner) RunSource(ctx interface{}, source []byte, function string, args
 }
 
 // run is the internal execution method.
-func (r *Runner) run(ctx interface{}, fs star.FS, path, function string, args ...any) (result starlark.Value, err error) {
+func (r *Runner) run(ctx any, fs star.FS, path, function string, args ...any) (result starlark.Value, err error) {
 	startTime := time.Now()
-	
+
 	// Create execution context
 	info := RunInfo{
 		Environ:   make(map[string]string),
 		StartTime: startTime,
 		Logger:    r.logger,
 	}
-	
+
 	// Setup workflow backend based on environment
 	backend, workflowCtx := r.setupWorkflowBackend(ctx, info)
-	
+
 	// Initialize plugin modules with the appropriate context
 	pluginModules := starlark.StringDict{}
 	for id, plugin := range r.plugins {
 		pluginModules[id] = plugin.Module(workflowCtx, info)
 	}
-	
+
 	// Create Starlark thread
 	thread := &starlark.Thread{
 		Name: "safeclaw",
@@ -122,7 +122,7 @@ func (r *Runner) run(ctx interface{}, fs star.FS, path, function string, args ..
 			r.logger.Info(msg)
 		},
 	}
-	
+
 	// Store context and backend in thread-local storage for plugins to access
 	// Try to extract standard context for thread local storage
 	var stdCtx context.Context
@@ -133,22 +133,22 @@ func (r *Runner) run(ctx interface{}, fs star.FS, path, function string, args ..
 	} else {
 		stdCtx = context.Background()
 	}
-	
+
 	thread.SetLocal("ctx", stdCtx)
 	thread.SetLocal("workflow_ctx", workflowCtx)
 	thread.SetLocal("workflow_backend", backend)
 	thread.SetLocal("logger", r.logger)
-	
+
 	// Fix Bug 4: Store atexit module in thread-local storage for register/unregister functions
 	if atexitModule, ok := pluginModules["atexit"]; ok {
 		thread.SetLocal("atexit_module", atexitModule)
 	}
-	
+
 	// Setup module loader
 	thread.Load = star.ThreadLoad(fs, r.builtins, map[string]starlark.StringDict{
 		"plugin": pluginModules,
 	})
-	
+
 	// Convert Go args to Starlark args
 	starArgs := make(starlark.Tuple, len(args))
 	for i, arg := range args {
@@ -158,14 +158,14 @@ func (r *Runner) run(ctx interface{}, fs star.FS, path, function string, args ..
 		}
 		starArgs[i] = v
 	}
-	
+
 	// Execute the function
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("panic during execution: %v", rec)
 		}
 	}()
-	
+
 	result, err = star.Call(thread, path, function, starArgs, nil)
 	if err != nil {
 		var evalErr *starlark.EvalError
@@ -176,7 +176,7 @@ func (r *Runner) run(ctx interface{}, fs star.FS, path, function string, args ..
 		}
 		return nil, fmt.Errorf("execution failed: %w", err)
 	}
-	
+
 	return result, nil
 }
 
@@ -202,9 +202,9 @@ func GetLogger(t *starlark.Thread) *slog.Logger {
 
 // setupWorkflowBackend sets up the workflow backend based on the environment.
 // Returns the backend and a context that plugins can use (may be temp.Context or context.Context).
-func (r *Runner) setupWorkflowBackend(ctx interface{}, info RunInfo) (workflow.Backend, interface{}) {
+func (r *Runner) setupWorkflowBackend(ctx any, info RunInfo) (workflow.Backend, any) {
 	mode := workflow.GetMode(info.Environ)
-	
+
 	// Check if we're already in a Temporal workflow context
 	if tempCtx, ok := ctx.(temp.Context); ok {
 		// We're in a Temporal workflow, use Temporal backend regardless of mode
@@ -213,7 +213,7 @@ func (r *Runner) setupWorkflowBackend(ctx interface{}, info RunInfo) (workflow.B
 		enrichedCtx := temp.WithValue(tempCtx, "safeclaw.workflow.backend", backend)
 		return backend, enrichedCtx
 	}
-	
+
 	// Extract standard context
 	var stdCtx context.Context
 	if c, ok := ctx.(context.Context); ok {
@@ -221,16 +221,16 @@ func (r *Runner) setupWorkflowBackend(ctx interface{}, info RunInfo) (workflow.B
 	} else {
 		stdCtx = context.Background()
 	}
-	
+
 	// Not in Temporal workflow context, use local backend
 	backend := workflow.NewLocalBackend(stdCtx)
 	// Store the backend in the standard context
 	enrichedCtx := context.WithValue(stdCtx, "safeclaw.workflow.backend", backend)
-	
+
 	if mode == workflow.ModeWorkflow {
 		// Workflow mode requested but not in a workflow context
 		r.logger.Warn("workflow mode requested but not in workflow context, using local backend")
 	}
-	
+
 	return backend, enrichedCtx
 }

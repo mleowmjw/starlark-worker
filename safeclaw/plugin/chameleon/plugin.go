@@ -1,7 +1,6 @@
 package chameleon
 
 import (
-
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -35,7 +34,7 @@ type plugin struct{}
 
 func (p *plugin) ID() string { return "chameleon" }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	scenario := strings.TrimSpace(info.Environ["CHAMELEON_SCENARIO"])
 	if scenario == "" {
 		scenario = "default"
@@ -226,7 +225,7 @@ func _call(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs
 	}
 
 	// Parse JSON result and convert to Starlark
-	var result interface{}
+	var result any
 	if err := json.Unmarshal(methodData, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse method result: %w", err)
 	}
@@ -262,7 +261,7 @@ func _getMockData(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple,
 		return starlark.None, nil
 	}
 
-	var result interface{}
+	var result any
 	if err := json.Unmarshal(data, &result); err != nil {
 		return starlark.None, nil
 	}

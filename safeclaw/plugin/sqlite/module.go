@@ -13,25 +13,25 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Module struct{
+type Module struct {
 	backend workflow.Backend
 }
 
 var _ starlark.HasAttrs = &Module{}
 
-func (f *Module) String() string                        { return "sqlite" }
-func (f *Module) Type() string                          { return "sqlite" }
-func (f *Module) Freeze()                               {}
-func (f *Module) Truth() starlark.Bool                  { return true }
-func (f *Module) Hash() (uint32, error)                 { return 0, fmt.Errorf("unhashable: sqlite") }
-func (m *Module) Attr(n string) (starlark.Value, error) { 
+func (f *Module) String() string        { return "sqlite" }
+func (f *Module) Type() string          { return "sqlite" }
+func (f *Module) Freeze()               {}
+func (f *Module) Truth() starlark.Bool  { return true }
+func (f *Module) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: sqlite") }
+func (m *Module) Attr(n string) (starlark.Value, error) {
 	if builtin, ok := m.builtins()[n]; ok {
 		return builtin, nil
 	}
-	return star.Attr(m, n, nil, properties) 
+	return star.Attr(m, n, nil, properties)
 }
 
-func (m *Module) AttrNames() []string { 
+func (m *Module) AttrNames() []string {
 	names := []string{}
 	for name := range m.builtins() {
 		names = append(names, name)
@@ -157,8 +157,8 @@ func querySQL(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwa
 
 	result := starlark.NewList(nil)
 	for rows.Next() {
-		values := make([]interface{}, len(cols))
-		scanArgs := make([]interface{}, len(cols))
+		values := make([]any, len(cols))
+		scanArgs := make([]any, len(cols))
 		for i := range values {
 			scanArgs[i] = &values[i]
 		}
@@ -199,7 +199,7 @@ func ensureDir(dbPath string) error {
 	return os.MkdirAll(dir, 0o755)
 }
 
-func toStarlarkValue(v interface{}) starlark.Value {
+func toStarlarkValue(v any) starlark.Value {
 	switch t := v.(type) {
 	case nil:
 		return starlark.None

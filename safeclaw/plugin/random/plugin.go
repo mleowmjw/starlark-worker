@@ -1,7 +1,6 @@
 package random
 
 import (
-
 	"fmt"
 	"math/rand/v2"
 
@@ -19,9 +18,9 @@ func (p *plugin) ID() string {
 	return "random"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	backend := workflow.GetBackend(ctx)
-	
+
 	m := &Module{
 		rand:    nil, // Will be set when seed() is called
 		backend: backend,
@@ -79,7 +78,7 @@ func (m *Module) randIntFn(t *starlark.Thread, fn *starlark.Builtin, args starla
 	var v int
 	if m.backend != nil && m.backend.InWorkflow() {
 		// Use workflow SideEffect for deterministic replay
-		m.backend.SideEffect(func() interface{} {
+		m.backend.SideEffect(func() any {
 			if m.rand != nil {
 				return m.rand.IntN(max-min+1) + min
 			}
@@ -102,7 +101,7 @@ func (m *Module) randFn(t *starlark.Thread, fn *starlark.Builtin, args starlark.
 	var v float64
 	if m.backend != nil && m.backend.InWorkflow() {
 		// Use workflow SideEffect for deterministic replay
-		m.backend.SideEffect(func() interface{} {
+		m.backend.SideEffect(func() any {
 			if m.rand != nil {
 				return m.rand.Float64()
 			}

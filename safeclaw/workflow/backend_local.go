@@ -32,7 +32,7 @@ func (b *LocalBackend) Now() time.Time {
 func (b *LocalBackend) Sleep(d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
-	
+
 	select {
 	case <-timer.C:
 		return nil
@@ -42,13 +42,13 @@ func (b *LocalBackend) Sleep(d time.Duration) error {
 }
 
 // SideEffect executes the function immediately and wraps the result.
-func (b *LocalBackend) SideEffect(f func() interface{}) EncodedValue {
+func (b *LocalBackend) SideEffect(f func() any) EncodedValue {
 	result := f()
 	return &localEncodedValue{value: result}
 }
 
 // ExecuteActivity executes the activity function directly (no async execution).
-func (b *LocalBackend) ExecuteActivity(activity interface{}, args ...interface{}) Future {
+func (b *LocalBackend) ExecuteActivity(activity any, args ...any) Future {
 	// For local mode, we execute activities synchronously
 	// This is a simplified version - in real usage, you'd call the activity function directly
 	return &localFuture{
@@ -60,21 +60,21 @@ func (b *LocalBackend) ExecuteActivity(activity interface{}, args ...interface{}
 
 // localEncodedValue wraps a value for immediate retrieval.
 type localEncodedValue struct {
-	value interface{}
+	value any
 }
 
-func (v *localEncodedValue) Get(valuePtr interface{}) error {
+func (v *localEncodedValue) Get(valuePtr any) error {
 	return assign(v.value, valuePtr)
 }
 
 // localFuture represents a completed operation in local mode.
 type localFuture struct {
-	result interface{}
+	result any
 	err    error
 	ready  bool
 }
 
-func (f *localFuture) Get(valuePtr interface{}) error {
+func (f *localFuture) Get(valuePtr any) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -86,9 +86,9 @@ func (f *localFuture) IsReady() bool {
 }
 
 // assign copies value to valuePtr using reflection-like behavior.
-func assign(value interface{}, valuePtr interface{}) error {
+func assign(value any, valuePtr any) error {
 	switch ptr := valuePtr.(type) {
-	case *interface{}:
+	case *any:
 		*ptr = value
 		return nil
 	case *string:

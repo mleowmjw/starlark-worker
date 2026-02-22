@@ -1,8 +1,6 @@
 package sqlite
 
 import (
-
-
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/workflow"
 	"go.starlark.net/starlark"
@@ -16,7 +14,7 @@ func (p *plugin) ID() string {
 	return "sqlite"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	backend := workflow.GetBackend(ctx)
 	return &Module{
 		backend: backend,

@@ -118,7 +118,6 @@ def sleep_n(n):
 
 		// Start 3 concurrent sleeps
 		for i, duration := range []int{2, 4, 6} {
-			i, duration := i, duration
 			go func() {
 				result, _ := runner.RunSource(context.Background(), source, "sleep_n", duration)
 				if f, ok := result.(starlark.Int); ok {
@@ -134,7 +133,7 @@ def sleep_n(n):
 		time.Sleep(6 * time.Second)
 
 		// All should complete
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			select {
 			case <-results[i]:
 				// Success

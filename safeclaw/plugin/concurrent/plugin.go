@@ -20,7 +20,7 @@ func (p *plugin) ID() string {
 	return "concurrent"
 }
 
-func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
 	// Extract the standard context if possible
 	var stdCtx context.Context
 	if c, ok := ctx.(context.Context); ok {
@@ -28,7 +28,7 @@ func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
 	} else {
 		stdCtx = context.Background()
 	}
-	
+
 	return &Module{
 		ctx: stdCtx,
 	}
@@ -67,16 +67,16 @@ func run(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []
 
 	go func() {
 		defer close(future.done)
-		
+
 		// Create a new thread for the goroutine
 		subThread := &starlark.Thread{
-			Name: "concurrent",
+			Name:  "concurrent",
 			Print: t.Print,
 		}
 		// Copy thread-local storage
 		subThread.SetLocal("ctx", t.Local("ctx"))
 		subThread.SetLocal("logger", t.Local("logger"))
-		
+
 		result, err := starlark.Call(subThread, fn, callArgs, kwargs)
 		future.mu.Lock()
 		future.result = result
@@ -127,9 +127,7 @@ func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 	g.SetLimit(maxConcurrency)
 
 	for i, callableObj := range callables {
-		i := i
-		callableObj := callableObj
-		
+
 		future := &Future{
 			done: make(chan struct{}),
 		}
@@ -137,7 +135,7 @@ func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 
 		g.Go(func() error {
 			defer close(future.done)
-			
+
 			// Check if context is cancelled before starting work
 			if err := gCtx.Err(); err != nil {
 				future.mu.Lock()
@@ -145,22 +143,22 @@ func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 				future.mu.Unlock()
 				return nil
 			}
-			
+
 			// Create a new thread for the goroutine
 			subThread := &starlark.Thread{
-				Name: "concurrent",
+				Name:  "concurrent",
 				Print: t.Print,
 			}
 			// Use the errgroup context for cancellation propagation
 			subThread.SetLocal("ctx", gCtx)
 			subThread.SetLocal("logger", t.Local("logger"))
-			
+
 			result, err := starlark.Call(subThread, callableObj.Fn, callableObj.Args, nil)
 			future.mu.Lock()
 			future.result = result
 			future.err = err
 			future.mu.Unlock()
-			
+
 			return nil // We store errors in the future, not in errgroup
 		})
 	}
@@ -178,10 +176,10 @@ func newCallable(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, k
 	if args.Len() < 1 {
 		return nil, fmt.Errorf("new_callable requires at least 1 argument")
 	}
-	
+
 	fn := args[0]
 	callArgs := args[1:]
-	
+
 	return &Callable{
 		Fn:   fn,
 		Args: callArgs,
@@ -201,7 +199,7 @@ var _ starlark.HasAttrs = &Future{}
 
 func (f *Future) String() string        { return "<Future>" }
 func (f *Future) Type() string          { return "Future" }
-func (f *Future) Freeze()                {}
+func (f *Future) Freeze()               {}
 func (f *Future) Truth() starlark.Bool  { return true }
 func (f *Future) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: Future") }
 
@@ -223,10 +221,10 @@ func (f *Future) AttrNames() []string {
 func (f *Future) resultMethod(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	// Wait for the future to complete
 	<-f.done
-	
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	
+
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -253,7 +251,7 @@ var _ starlark.HasAttrs = &BatchFuture{}
 
 func (b *BatchFuture) String() string        { return "<BatchFuture>" }
 func (b *BatchFuture) Type() string          { return "BatchFuture" }
-func (b *BatchFuture) Freeze()                {}
+func (b *BatchFuture) Freeze()               {}
 func (b *BatchFuture) Truth() starlark.Bool  { return true }
 func (b *BatchFuture) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: BatchFuture") }
 
@@ -275,7 +273,7 @@ func (b *BatchFuture) AttrNames() []string {
 func (b *BatchFuture) resultMethod(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	// Wait for all futures to complete
 	<-b.done
-	
+
 	results := make([]starlark.Value, len(b.futures))
 	for i, future := range b.futures {
 		<-future.done
@@ -287,7 +285,7 @@ func (b *BatchFuture) resultMethod(t *starlark.Thread, fn *starlark.Builtin, arg
 		results[i] = future.result
 		future.mu.Unlock()
 	}
-	
+
 	return starlark.NewList(results), nil
 }
 
@@ -310,6 +308,6 @@ var _ starlark.Value = &Callable{}
 
 func (c *Callable) String() string        { return "<Callable>" }
 func (c *Callable) Type() string          { return "Callable" }
-func (c *Callable) Freeze()                {}
+func (c *Callable) Freeze()               {}
 func (c *Callable) Truth() starlark.Bool  { return true }
 func (c *Callable) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: Callable") }
