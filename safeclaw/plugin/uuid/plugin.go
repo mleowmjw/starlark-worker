@@ -1,11 +1,12 @@
 package uuid
 
 import (
-	"context"
+
 	"fmt"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/workflow"
 	"github.com/google/uuid"
 	"go.starlark.net/starlark"
 )
@@ -18,11 +19,16 @@ func (p *plugin) ID() string {
 	return "uuid"
 }
 
-func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
-	return &Module{}
+func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+	backend := workflow.GetBackend(ctx)
+	return &Module{
+		backend: backend,
+	}
 }
 
-type Module struct{}
+type Module struct{
+	backend workflow.Backend
+}
 
 var _ starlark.HasAttrs = &Module{}
 
@@ -31,16 +37,30 @@ func (f *Module) Type() string                          { return "uuid" }
 func (f *Module) Freeze()                               {}
 func (f *Module) Truth() starlark.Bool                  { return true }
 func (f *Module) Hash() (uint32, error)                 { return 0, fmt.Errorf("unhashable: uuid") }
-func (f *Module) Attr(n string) (starlark.Value, error) { return star.Attr(f, n, builtins, properties) }
-func (f *Module) AttrNames() []string                   { return star.AttrNames(builtins, properties) }
+func (m *Module) Attr(n string) (starlark.Value, error) { 
+	if builtin, ok := m.builtins()[n]; ok {
+		return builtin, nil
+	}
+	return star.Attr(m, n, nil, properties) 
+}
 
-var builtins = map[string]*starlark.Builtin{
-	"uuid4": starlark.NewBuiltin("uuid4", uuid4),
+func (m *Module) AttrNames() []string { 
+	names := []string{}
+	for name := range m.builtins() {
+		names = append(names, name)
+	}
+	return names
+}
+
+func (m *Module) builtins() map[string]*starlark.Builtin {
+	return map[string]*starlark.Builtin{
+		"uuid4": starlark.NewBuiltin("uuid4", m.uuid4).BindReceiver(m),
+	}
 }
 
 var properties = map[string]star.PropertyFactory{}
 
-func uuid4(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func (m *Module) uuid4(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	logger := safeclaw.GetLogger(t)
 
 	if err := starlark.UnpackArgs("uuid4", args, kwargs); err != nil {
@@ -48,8 +68,17 @@ func uuid4(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs 
 		return nil, err
 	}
 
-	// Generate a new UUID directly (no workflow.SideEffect needed)
-	stringUUID := uuid.New().String()
+	var stringUUID string
+	if m.backend != nil && m.backend.InWorkflow() {
+		// Use workflow SideEffect for deterministic replay
+		m.backend.SideEffect(func() interface{} {
+			return uuid.New().String()
+		}).Get(&stringUUID)
+	} else {
+		// Direct execution (dev mode)
+		stringUUID = uuid.New().String()
+	}
+	
 	return &UUID{StringUUID: starlark.String(stringUUID)}, nil
 }
 

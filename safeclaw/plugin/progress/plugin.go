@@ -1,7 +1,7 @@
 package progress
 
 import (
-	"context"
+
 	"fmt"
 	"log/slog"
 
@@ -18,7 +18,7 @@ func (p *plugin) ID() string {
 	return "progress"
 }
 
-func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
 	return &Module{
 		logger: info.Logger,
 	}

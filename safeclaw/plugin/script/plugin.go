@@ -1,12 +1,13 @@
 package script
 
 import (
-	"context"
+
 	"fmt"
 
 	"github.com/bitfield/script"
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/workflow"
 	"go.starlark.net/starlark"
 )
 
@@ -18,11 +19,16 @@ func (p *plugin) ID() string {
 	return "script"
 }
 
-func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
-	return &Module{}
+func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+	backend := workflow.GetBackend(ctx)
+	return &Module{
+		backend: backend,
+	}
 }
 
-type Module struct{}
+type Module struct{
+	backend workflow.Backend
+}
 
 var _ starlark.HasAttrs = &Module{}
 
@@ -43,8 +49,9 @@ var builtins = map[string]*starlark.Builtin{
 
 var properties = map[string]star.PropertyFactory{}
 
-func _exec(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func _exec(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	logger := safeclaw.GetLogger(t)
+	receiver := fn.Receiver().(*Module)
 
 	var command starlark.String
 	if err := starlark.UnpackArgs("exec", args, kwargs, "command", &command); err != nil {
@@ -52,12 +59,32 @@ func _exec(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs 
 		return nil, err
 	}
 
+	if receiver.backend != nil && receiver.backend.InWorkflow() {
+		// Execute via activity in workflow mode
+		var output ScriptOutput
+		err := receiver.backend.ExecuteActivity(ScriptExecActivity, ScriptExecInput{
+			Command: command.GoString(),
+		}).Get(&output)
+		if err != nil {
+			logger.Error("script.exec: activity failed", "error", err)
+			return nil, err
+		}
+		if output.Error != "" {
+			return nil, fmt.Errorf("script exec failed: %s", output.Error)
+		}
+		// Return a pipe with the result
+		pipe := script.Echo(string(output.Data))
+		return &Pipe{pipe: pipe, backend: receiver.backend}, nil
+	}
+
+	// Direct execution (dev mode)
 	pipe := script.Exec(command.GoString())
-	return &Pipe{pipe: pipe}, nil
+	return &Pipe{pipe: pipe, backend: receiver.backend}, nil
 }
 
-func _file(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func _file(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	logger := safeclaw.GetLogger(t)
+	receiver := fn.Receiver().(*Module)
 
 	var path starlark.String
 	if err := starlark.UnpackArgs("file", args, kwargs, "path", &path); err != nil {
@@ -65,12 +92,32 @@ func _file(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs 
 		return nil, err
 	}
 
+	if receiver.backend != nil && receiver.backend.InWorkflow() {
+		// Execute via activity in workflow mode
+		var output ScriptOutput
+		err := receiver.backend.ExecuteActivity(ScriptFileActivity, ScriptFileInput{
+			Path: path.GoString(),
+		}).Get(&output)
+		if err != nil {
+			logger.Error("script.file: activity failed", "error", err)
+			return nil, err
+		}
+		if output.Error != "" {
+			return nil, fmt.Errorf("script file failed: %s", output.Error)
+		}
+		// Return a pipe with the result
+		pipe := script.Echo(string(output.Data))
+		return &Pipe{pipe: pipe, backend: receiver.backend}, nil
+	}
+
+	// Direct execution (dev mode)
 	pipe := script.File(path.GoString())
-	return &Pipe{pipe: pipe}, nil
+	return &Pipe{pipe: pipe, backend: receiver.backend}, nil
 }
 
-func _echo(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func _echo(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	logger := safeclaw.GetLogger(t)
+	receiver := fn.Receiver().(*Module)
 
 	var text starlark.String
 	if err := starlark.UnpackArgs("echo", args, kwargs, "text", &text); err != nil {
@@ -79,17 +126,19 @@ func _echo(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs 
 	}
 
 	pipe := script.Echo(text.GoString())
-	return &Pipe{pipe: pipe}, nil
+	return &Pipe{pipe: pipe, backend: receiver.backend}, nil
 }
 
-func _stdin(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func _stdin(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	receiver := fn.Receiver().(*Module)
 	pipe := script.Stdin()
-	return &Pipe{pipe: pipe}, nil
+	return &Pipe{pipe: pipe, backend: receiver.backend}, nil
 }
 
 // Pipe wraps script.Pipe for Starlark
 type Pipe struct {
-	pipe *script.Pipe
+	pipe    *script.Pipe
+	backend workflow.Backend
 }
 
 var _ starlark.Value = &Pipe{}

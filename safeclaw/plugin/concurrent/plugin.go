@@ -2,6 +2,7 @@ package concurrent
 
 import (
 	"context"
+
 	"fmt"
 	"sync"
 
@@ -19,9 +20,17 @@ func (p *plugin) ID() string {
 	return "concurrent"
 }
 
-func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+	// Extract the standard context if possible
+	var stdCtx context.Context
+	if c, ok := ctx.(context.Context); ok {
+		stdCtx = c
+	} else {
+		stdCtx = context.Background()
+	}
+	
 	return &Module{
-		ctx: ctx,
+		ctx: stdCtx,
 	}
 }
 

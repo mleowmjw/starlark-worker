@@ -1,7 +1,7 @@
 package whatsapp
 
 import (
-	"context"
+
 	"fmt"
 	"sort"
 	"strings"
@@ -35,7 +35,7 @@ type plugin struct{}
 
 func (p *plugin) ID() string { return "whatsapp" }
 
-func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
 	scenario := strings.TrimSpace(info.Environ["WHATSAPP_SCENARIO"])
 	if scenario == "" {
 		scenario = "mixed"

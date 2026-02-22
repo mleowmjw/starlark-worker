@@ -1,7 +1,7 @@
 package chameleon
 
 import (
-	"context"
+
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -35,7 +35,7 @@ type plugin struct{}
 
 func (p *plugin) ID() string { return "chameleon" }
 
-func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
 	scenario := strings.TrimSpace(info.Environ["CHAMELEON_SCENARIO"])
 	if scenario == "" {
 		scenario = "default"

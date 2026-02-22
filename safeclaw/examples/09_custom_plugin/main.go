@@ -18,7 +18,7 @@ func (p *CustomPlugin) ID() string {
 	return "custom"
 }
 
-func (p *CustomPlugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
+func (p *CustomPlugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
 	return &CustomModule{}
 }
 

@@ -1,12 +1,13 @@
 package random
 
 import (
-	"context"
+
 	"fmt"
 	"math/rand/v2"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/ext"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/workflow"
 	"go.starlark.net/starlark"
 )
 
@@ -18,9 +19,12 @@ func (p *plugin) ID() string {
 	return "random"
 }
 
-func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+	backend := workflow.GetBackend(ctx)
+	
 	m := &Module{
-		rand: nil, // Will be set when seed() is called
+		rand:    nil, // Will be set when seed() is called
+		backend: backend,
 	}
 	m.attributes = map[string]starlark.Value{
 		"seed":    starlark.NewBuiltin("seed", m.seedFn).BindReceiver(m),
@@ -33,6 +37,7 @@ func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Val
 type Module struct {
 	attributes map[string]starlark.Value
 	rand       *rand.Rand
+	backend    workflow.Backend
 }
 
 var _ starlark.HasAttrs = &Module{}
@@ -72,12 +77,21 @@ func (m *Module) randIntFn(t *starlark.Thread, fn *starlark.Builtin, args starla
 	}
 
 	var v int
-	if m.rand != nil {
-		// seed was called before and a random source was created. Use it.
-		v = m.rand.IntN(max-min+1) + min
+	if m.backend != nil && m.backend.InWorkflow() {
+		// Use workflow SideEffect for deterministic replay
+		m.backend.SideEffect(func() interface{} {
+			if m.rand != nil {
+				return m.rand.IntN(max-min+1) + min
+			}
+			return rand.IntN(max-min+1) + min
+		}).Get(&v)
 	} else {
-		// seed was not called before. Use the default random source
-		v = rand.IntN(max-min+1) + min
+		// Direct execution (dev mode)
+		if m.rand != nil {
+			v = m.rand.IntN(max-min+1) + min
+		} else {
+			v = rand.IntN(max-min+1) + min
+		}
 	}
 
 	return starlark.MakeInt(v), nil
@@ -86,12 +100,21 @@ func (m *Module) randIntFn(t *starlark.Thread, fn *starlark.Builtin, args starla
 // randFn generates a random floating point number between 0 and 1
 func (m *Module) randFn(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var v float64
-	if m.rand != nil {
-		// seed was called before and a random source was created. Use it
-		v = m.rand.Float64()
+	if m.backend != nil && m.backend.InWorkflow() {
+		// Use workflow SideEffect for deterministic replay
+		m.backend.SideEffect(func() interface{} {
+			if m.rand != nil {
+				return m.rand.Float64()
+			}
+			return rand.Float64()
+		}).Get(&v)
 	} else {
-		// seed was not called before. Use the default random source
-		v = rand.Float64()
+		// Direct execution (dev mode)
+		if m.rand != nil {
+			v = m.rand.Float64()
+		} else {
+			v = rand.Float64()
+		}
 	}
 
 	return starlark.Float(v), nil

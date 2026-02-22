@@ -1,15 +1,17 @@
 package request
 
 import (
+	"context"
 	"bufio"
 	"bytes"
-	"context"
+
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/workflow"
 	"go.starlark.net/starlark"
 )
 
@@ -21,16 +23,28 @@ func (p *plugin) ID() string {
 	return "request"
 }
 
-func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
+func (p *plugin) Module(ctx interface{}, info safeclaw.RunInfo) starlark.Value {
+	backend := workflow.GetBackend(ctx)
+	
+	// Extract the standard context if possible
+	var stdCtx context.Context
+	if c, ok := ctx.(context.Context); ok {
+		stdCtx = c
+	} else {
+		stdCtx = context.Background()
+	}
+	
 	return &Module{
-		client: http.DefaultClient,
-		ctx:    ctx,
+		client:  http.DefaultClient,
+		ctx:     stdCtx,
+		backend: backend,
 	}
 }
 
 type Module struct {
-	client *http.Client
-	ctx    context.Context
+	client  *http.Client
+	ctx     context.Context
+	backend workflow.Backend
 }
 
 var _ starlark.HasAttrs = &Module{}
@@ -107,7 +121,28 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 		}
 	}
 
-	// Create HTTP request
+	// Check if we should use workflow activity
+	if module.backend != nil && module.backend.InWorkflow() {
+		// Execute via Temporal activity
+		input := HTTPRequestInput{
+			Method:  method.GoString(),
+			URL:     url.GoString(),
+			Body:    bodyBytes,
+			Headers: headerMap,
+		}
+		
+		var output HTTPRequestOutput
+		err := module.backend.ExecuteActivity(HTTPRequestActivity, input).Get(&output)
+		if err != nil {
+			logger.Error("request.do: activity failed", "error", err)
+			return nil, fmt.Errorf("activity failed: %w", err)
+		}
+		
+		// Convert output to Response
+		return activityOutputToResponse(output)
+	}
+
+	// Direct execution (dev mode)
 	var br io.Reader
 	if len(bodyBytes) > 0 {
 		br = bytes.NewBuffer(bodyBytes)
@@ -127,9 +162,9 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 		logger.Error("request.do: request failed", "error", err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer res.Body.Close() // Fix Bug 1: Close the original response body to prevent resource leak
+	defer res.Body.Close()
 
-	// Serialize the response to bytes (like the original does)
+	// Serialize the response to bytes
 	var buf bytes.Buffer
 	if err := res.Write(&buf); err != nil {
 		logger.Error("request.do: failed to serialize response", "error", err)
@@ -144,6 +179,22 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 	}
 
 	return &Response{Response: parsedRes}, nil
+}
+
+// activityOutputToResponse converts HTTPRequestOutput to a Response.
+func activityOutputToResponse(output HTTPRequestOutput) (starlark.Value, error) {
+	// Create an HTTP response from the output
+	res := &http.Response{
+		StatusCode: output.StatusCode,
+		Header:     http.Header(output.Headers),
+		Body:       io.NopCloser(bytes.NewReader(output.Body)),
+	}
+	
+	return &Response{
+		Response:  res,
+		bodyCache: output.Body,
+		bodyRead:  true,
+	}, nil
 }
 
 // Response wraps http.Response for Starlark
