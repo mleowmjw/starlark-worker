@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/mode"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
 	"go.starlark.net/starlark"
 	"golang.org/x/sync/errgroup"
@@ -50,6 +51,21 @@ var properties = map[string]star.PropertyFactory{}
 func run(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	fn := args[0]
 	callArgs := args[1:]
+	rt := safeclaw.GetRuntime(t)
+
+	if rt.Mode() != mode.Dev {
+		subThread := &starlark.Thread{
+			Name:  "concurrent",
+			Print: t.Print,
+		}
+		subThread.SetLocal("ctx", t.Local("ctx"))
+		subThread.SetLocal("logger", t.Local("logger"))
+		subThread.SetLocal("nondet_runtime", rt)
+		result, err := starlark.Call(subThread, fn, callArgs, kwargs)
+		future := &Future{done: make(chan struct{}), result: result, err: err}
+		close(future.done)
+		return future, nil
+	}
 
 	// Create a future backed by a goroutine
 	future := &Future{
@@ -67,6 +83,7 @@ func run(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []
 		// Copy thread-local storage
 		subThread.SetLocal("ctx", t.Local("ctx"))
 		subThread.SetLocal("logger", t.Local("logger"))
+		subThread.SetLocal("nondet_runtime", t.Local("nondet_runtime"))
 		
 		result, err := starlark.Call(subThread, fn, callArgs, kwargs)
 		future.mu.Lock()
@@ -81,6 +98,7 @@ func run(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []
 func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	logger := safeclaw.GetLogger(t)
 	ctx := safeclaw.GetContext(t) // Fix Bug 3: Get the actual execution context
+	rt := safeclaw.GetRuntime(t)
 
 	var callablesList *starlark.List
 	var maxConcurrency int
@@ -111,6 +129,21 @@ func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 	batchFuture := &BatchFuture{
 		futures: make([]*Future, len(callables)),
 		done:    make(chan struct{}),
+	}
+
+	if rt.Mode() != mode.Dev {
+		for i, callableObj := range callables {
+			subThread := &starlark.Thread{Name: "concurrent", Print: t.Print}
+			subThread.SetLocal("ctx", ctx)
+			subThread.SetLocal("logger", t.Local("logger"))
+			subThread.SetLocal("nondet_runtime", rt)
+			result, err := starlark.Call(subThread, callableObj.Fn, callableObj.Args, nil)
+			f := &Future{done: make(chan struct{}), result: result, err: err}
+			close(f.done)
+			batchFuture.futures[i] = f
+		}
+		close(batchFuture.done)
+		return batchFuture, nil
 	}
 
 	// Use errgroup for controlled concurrency with the actual context
@@ -145,6 +178,7 @@ func batchRun(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 			// Use the errgroup context for cancellation propagation
 			subThread.SetLocal("ctx", gCtx)
 			subThread.SetLocal("logger", t.Local("logger"))
+			subThread.SetLocal("nondet_runtime", t.Local("nondet_runtime"))
 			
 			result, err := starlark.Call(subThread, callableObj.Fn, callableObj.Args, nil)
 			future.mu.Lock()

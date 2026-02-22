@@ -40,3 +40,7 @@ mise.local.toml
 
 # Ignore binary
 starlark-worker
+
+# Ignore Cursor metadata
+package-lock.json
+

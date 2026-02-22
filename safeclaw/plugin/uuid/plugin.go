@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
-	"github.com/google/uuid"
 	"go.starlark.net/starlark"
 )
 
@@ -48,8 +48,10 @@ func uuid4(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs 
 		return nil, err
 	}
 
-	// Generate a new UUID directly (no workflow.SideEffect needed)
-	stringUUID := uuid.New().String()
+	stringUUID, err := nondet.UUID4(safeclaw.GetContext(t), safeclaw.GetRuntime(t))
+	if err != nil {
+		return nil, err
+	}
 	return &UUID{StringUUID: starlark.String(stringUUID)}, nil
 }
 

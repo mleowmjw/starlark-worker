@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
@@ -55,6 +56,7 @@ type Module struct {
 	scenario  string
 	self      string
 	startUnix int64
+	mu        sync.Mutex
 	seq       int64
 }
 
@@ -290,8 +292,11 @@ func _sendMessage(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple,
 	}
 
 	m := fn.Receiver().(*Module)
+	m.mu.Lock()
 	m.seq++
 	id := fmt.Sprintf("mock-out-%d-%d", m.startUnix, m.seq)
+	seq := m.seq
+	m.mu.Unlock()
 
 	// Best-effort: attach chat name if known
 	chats, _ := mockData(m)
@@ -307,7 +312,7 @@ func _sendMessage(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple,
 		ID:        id,
 		ChatID:    chatID.GoString(),
 		ChatName:  chatName,
-		Timestamp: m.startUnix + m.seq, // monotonic-ish
+		Timestamp: m.startUnix + seq, // monotonic-ish
 		Sender:    m.self,
 		Direction: "out",
 		Text:      text.GoString(),

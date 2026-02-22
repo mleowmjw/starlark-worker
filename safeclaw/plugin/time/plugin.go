@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/ext"
 	"go.starlark.net/starlark"
@@ -30,7 +31,8 @@ func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Val
 	delta := effectiveTime.Sub(info.StartTime)
 	
 	m := &Module{
-		delta: delta,
+		delta:   delta,
+		runtime: info.Runtime,
 	}
 	m.attributes = map[string]starlark.Value{
 		"sleep":              starlark.NewBuiltin("sleep", _sleep).BindReceiver(m),
@@ -44,6 +46,7 @@ func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Val
 type Module struct {
 	attributes map[string]starlark.Value
 	delta      time.Duration
+	runtime    nondet.Runtime
 }
 
 func (m *Module) String() string                        { return "time" }
@@ -59,6 +62,7 @@ var _ starlark.HasAttrs = &Module{}
 // _sleep suspends execution of the calling thread for the given number of seconds.
 func _sleep(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	logger := safeclaw.GetLogger(t)
+	receiver := fn.Receiver().(*Module)
 
 	var seconds starlark.Value
 	if err := starlark.UnpackArgs("sleep", args, kwargs, "seconds", &seconds); err != nil {
@@ -80,33 +84,33 @@ func _sleep(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwarg
 
 	duration := time.Duration(float64(time.Second) * sf)
 	
-	// Fix Bug 3: Respect context cancellation
 	ctx := safeclaw.GetContext(t)
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	
-	select {
-	case <-timer.C:
-		// Sleep completed normally
-		return starlark.None, nil
-	case <-ctx.Done():
-		// Context was cancelled or timed out
+	if err := nondet.Sleep(ctx, receiver.runtime, duration); err != nil {
 		logger.Info("time.sleep: interrupted by context cancellation", "elapsed", duration)
-		return nil, ctx.Err()
+		return nil, err
 	}
+	return starlark.None, nil
 }
 
 // _time_ns returns time as an integer number of nanoseconds since the epoch.
 func _time_ns(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	receiver := fn.Receiver().(*Module)
-	ns := time.Now().Add(receiver.delta).UnixNano()
+	now, err := nondet.Now(safeclaw.GetContext(t), receiver.runtime)
+	if err != nil {
+		now = time.Now()
+	}
+	ns := now.Add(receiver.delta).UnixNano()
 	return starlark.MakeInt64(ns), nil
 }
 
 // _time returns the current unix time in seconds as floating point number.
 func _time(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	receiver := fn.Receiver().(*Module)
-	ns := time.Now().Add(receiver.delta).UnixNano()
+	now, err := nondet.Now(safeclaw.GetContext(t), receiver.runtime)
+	if err != nil {
+		now = time.Now()
+	}
+	ns := now.Add(receiver.delta).UnixNano()
 	sec := float64(ns) / 1e9
 	return starlark.Float(sec), nil
 }

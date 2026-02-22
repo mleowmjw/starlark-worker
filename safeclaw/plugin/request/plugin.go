@@ -1,14 +1,14 @@
 package request
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/temporalops"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
 	"go.starlark.net/starlark"
 )
@@ -107,40 +107,20 @@ func _do(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []
 		}
 	}
 
-	// Create HTTP request
-	var br io.Reader
-	if len(bodyBytes) > 0 {
-		br = bytes.NewBuffer(bodyBytes)
-	}
-	
-	req, err := http.NewRequestWithContext(module.ctx, method.GoString(), url.GoString(), br)
-	if err != nil {
-		logger.Error("request.do: failed to create request", "error", err)
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	
-	req.Header = http.Header(headerMap)
-
-	// Execute the request
-	res, err := module.client.Do(req)
+	raw, err := nondet.HTTPDo(module.ctx, safeclaw.GetRuntime(t), temporalops.HTTPRequestInput{
+		Method:  method.GoString(),
+		URL:     url.GoString(),
+		Body:    bodyBytes,
+		Headers: headerMap,
+	})
 	if err != nil {
 		logger.Error("request.do: request failed", "error", err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer res.Body.Close() // Fix Bug 1: Close the original response body to prevent resource leak
-
-	// Serialize the response to bytes (like the original does)
-	var buf bytes.Buffer
-	if err := res.Write(&buf); err != nil {
-		logger.Error("request.do: failed to serialize response", "error", err)
-		return nil, fmt.Errorf("failed to serialize response: %w", err)
-	}
-
-	// Parse it back to create a Response object
-	parsedRes, err := http.ReadResponse(bufio.NewReader(&buf), nil)
+	parsedRes, err := temporalops.DecodeHTTPResponse(raw)
 	if err != nil {
-		logger.Error("request.do: failed to parse response", "error", err)
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		logger.Error("request.do: failed to decode response", "error", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	return &Response{Response: parsedRes}, nil

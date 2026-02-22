@@ -1,15 +1,13 @@
 package sqlite
 
 import (
-	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/temporalops"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
 	"go.starlark.net/starlark"
-	_ "modernc.org/sqlite"
 )
 
 type Module struct{}
@@ -40,26 +38,19 @@ func execSQL(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwarg
 		return nil, err
 	}
 
-	db, err := openDB(dbPath.GoString())
-	if err != nil {
-		logger.Error("sqlite.exec: open db failed", "error", err)
-		return nil, err
-	}
-	defer db.Close()
-
 	ctx := safeclaw.GetContext(t)
-	res, err := db.ExecContext(ctx, sqlStmt.GoString())
+	res, err := nondet.SQLiteExec(ctx, safeclaw.GetRuntime(t), temporalops.SQLiteExecInput{
+		DBPath: dbPath.GoString(),
+		SQL:    sqlStmt.GoString(),
+	})
 	if err != nil {
 		logger.Error("sqlite.exec: exec failed", "error", err)
 		return nil, err
 	}
 
-	rows, _ := res.RowsAffected()
-	lastID, _ := res.LastInsertId()
-
 	out := starlark.NewDict(2)
-	_ = out.SetKey(starlark.String("rows_affected"), starlark.MakeInt64(rows))
-	_ = out.SetKey(starlark.String("last_insert_id"), starlark.MakeInt64(lastID))
+	_ = out.SetKey(starlark.String("rows_affected"), starlark.MakeInt64(res.RowsAffected))
+	_ = out.SetKey(starlark.String("last_insert_id"), starlark.MakeInt64(res.LastInsertID))
 	return out, nil
 }
 
@@ -72,69 +63,26 @@ func querySQL(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwar
 		return nil, err
 	}
 
-	db, err := openDB(dbPath.GoString())
-	if err != nil {
-		logger.Error("sqlite.query: open db failed", "error", err)
-		return nil, err
-	}
-	defer db.Close()
-
 	ctx := safeclaw.GetContext(t)
-	rows, err := db.QueryContext(ctx, sqlStmt.GoString())
+	out, err := nondet.SQLiteQuery(ctx, safeclaw.GetRuntime(t), temporalops.SQLiteQueryInput{
+		DBPath: dbPath.GoString(),
+		SQL:    sqlStmt.GoString(),
+	})
 	if err != nil {
 		logger.Error("sqlite.query: query failed", "error", err)
 		return nil, err
 	}
-	defer rows.Close()
-
-	cols, err := rows.Columns()
-	if err != nil {
-		logger.Error("sqlite.query: columns failed", "error", err)
-		return nil, err
-	}
 
 	result := starlark.NewList(nil)
-	for rows.Next() {
-		values := make([]interface{}, len(cols))
-		scanArgs := make([]interface{}, len(cols))
-		for i := range values {
-			scanArgs[i] = &values[i]
-		}
-		if err := rows.Scan(scanArgs...); err != nil {
-			logger.Error("sqlite.query: scan failed", "error", err)
-			return nil, err
-		}
-
-		rowDict := starlark.NewDict(len(cols))
-		for i, name := range cols {
-			_ = rowDict.SetKey(starlark.String(name), toStarlarkValue(values[i]))
+	for _, row := range out.Rows {
+		rowDict := starlark.NewDict(len(row))
+		for name, value := range row {
+			_ = rowDict.SetKey(starlark.String(name), toStarlarkValue(value))
 		}
 		result.Append(rowDict)
 	}
-	if err := rows.Err(); err != nil {
-		logger.Error("sqlite.query: rows error", "error", err)
-		return nil, err
-	}
 
 	return result, nil
-}
-
-func openDB(dbPath string) (*sql.DB, error) {
-	if dbPath == "" {
-		return nil, fmt.Errorf("db_path is required")
-	}
-	if err := ensureDir(dbPath); err != nil {
-		return nil, err
-	}
-	return sql.Open("sqlite", dbPath)
-}
-
-func ensureDir(dbPath string) error {
-	dir := filepath.Dir(dbPath)
-	if dir == "." || dir == "" {
-		return nil
-	}
-	return os.MkdirAll(dir, 0o755)
 }
 
 func toStarlarkValue(v interface{}) starlark.Value {

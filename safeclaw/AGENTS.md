@@ -1791,10 +1791,45 @@ rows = sqlite.query(db_path="data/automation.sqlite", sql="SELECT id FROM t;")
 - Starlark multiline string concatenation inside `(...)` requires explicit `+` operators.
 - `RunSource` uses MemoryFS, so module `load("...")` won’t work unless you use `RunScript` with `LocalFS` (or TarFS).
 
-**Document Version**: 1.1  
-**Last Updated**: 2026-02-07  
+## Temporalized Nondeterminism Learnings (2026-02)
+
+### What changed
+- Added mode-aware runtime selection for nondeterministic behavior:
+  - `dev` -> stdlib runtime
+  - `staging|prod` -> Temporal SDK-backed runtime
+  - `test` -> Temporal testsuite-backed runtime
+- Kept plugin interfaces unchanged; Temporal remains an implementation detail.
+- Added non-breaking `Run*WithOptions` APIs for per-run env/runtime config.
+
+### Practical behavior notes
+- Raw output differs between `dev` and `test` runs mostly due to Temporal testsuite debug logs.
+- Semantic outputs match across examples; direct string equality is too strict unless debug logs are filtered.
+- Time-bearing outputs can still differ across separate process runs unless fixed test clock options are passed.
+
+### Determinism guidance
+- In `test` mode, use virtual clock controls in `RunOptions.Test`:
+  - `FixedUnixNano` for reproducible timestamps
+  - `DisableAutoAdvanceOnSleep` when sleep should not advance logical time
+- Without fixed test clock input, independent runs may produce different `current_time` values.
+
+### Plugin/runtime lessons
+- `time`, `random`, `uuid`, `request`, `sqlite`, and `concurrent` should route side effects through runtime abstractions.
+- For data-order stability, sort map-derived lists (e.g., `chameleon` service/scenario listings).
+- Guard mutable shared plugin state with mutexes where concurrent access is possible (e.g., `whatsapp` send sequence).
+
+### Validation checklist for future agents
+- Run `go test ./...` in `safeclaw/` after runtime changes.
+- Execute all examples in both default and `CHAMELEON_MODE=test`.
+- Compare outputs in three layers:
+  1) raw output,
+  2) normalized output (filter Temporal debug lines),
+  3) semantic output (ignore expected time jitter unless fixed clock is set).
+
+**Document Version**: 1.2  
+**Last Updated**: 2026-02-22  
 **Maintained By**: AI Agent Implementation Team
 
 **Changelog**:
+- v1.2 (2026-02-22): Added concise Temporalized Nondeterminism learnings and validation checklist
 - v1.1 (2026-02-07): Added "Critical Bug Fixes & Learnings" section with comprehensive bug reproduction, fixes, and key learnings
 - v1.0 (2026-02-06): Initial implementation documentation

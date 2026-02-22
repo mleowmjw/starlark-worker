@@ -7,6 +7,7 @@ import (
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/ext"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
 	"go.starlark.net/starlark"
 )
 
@@ -20,7 +21,8 @@ func (p *plugin) ID() string {
 
 func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
 	m := &Module{
-		rand: nil, // Will be set when seed() is called
+		rand:    nil, // Will be set when seed() is called
+		runtime: info.Runtime,
 	}
 	m.attributes = map[string]starlark.Value{
 		"seed":    starlark.NewBuiltin("seed", m.seedFn).BindReceiver(m),
@@ -33,6 +35,7 @@ func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Val
 type Module struct {
 	attributes map[string]starlark.Value
 	rand       *rand.Rand
+	runtime    nondet.Runtime
 }
 
 var _ starlark.HasAttrs = &Module{}
@@ -76,8 +79,12 @@ func (m *Module) randIntFn(t *starlark.Thread, fn *starlark.Builtin, args starla
 		// seed was called before and a random source was created. Use it.
 		v = m.rand.IntN(max-min+1) + min
 	} else {
-		// seed was not called before. Use the default random source
-		v = rand.IntN(max-min+1) + min
+		var err error
+		v, err = nondet.RandInt(safeclaw.GetContext(t), m.runtime, min, max)
+		if err != nil {
+			logger.Error("random.randint: nondet runtime failed", "error", err)
+			return nil, err
+		}
 	}
 
 	return starlark.MakeInt(v), nil
@@ -90,8 +97,11 @@ func (m *Module) randFn(t *starlark.Thread, fn *starlark.Builtin, args starlark.
 		// seed was called before and a random source was created. Use it
 		v = m.rand.Float64()
 	} else {
-		// seed was not called before. Use the default random source
-		v = rand.Float64()
+		var err error
+		v, err = nondet.RandFloat(safeclaw.GetContext(t), m.runtime)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return starlark.Float(v), nil

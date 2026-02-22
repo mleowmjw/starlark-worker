@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -109,11 +110,16 @@ func _info(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs
 	_ = d.SetKey(starlark.String("start_unix"), starlark.MakeInt64(m.startUnix))
 
 	m.mu.RLock()
-	services := make([]starlark.Value, 0, len(m.services))
+	serviceNames := make([]string, 0, len(m.services))
 	for name := range m.services {
-		services = append(services, starlark.String(name))
+		serviceNames = append(serviceNames, name)
 	}
 	m.mu.RUnlock()
+	sort.Strings(serviceNames)
+	services := make([]starlark.Value, 0, len(serviceNames))
+	for _, name := range serviceNames {
+		services = append(services, starlark.String(name))
+	}
 	_ = d.SetKey(starlark.String("services"), starlark.NewList(services))
 
 	return d, nil
@@ -166,8 +172,13 @@ func _scenarios(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, k
 		return starlark.NewList(nil), nil
 	}
 
-	scenarios := make([]starlark.Value, 0, len(svc.Scenarios))
+	scenarioNames := make([]string, 0, len(svc.Scenarios))
 	for name := range svc.Scenarios {
+		scenarioNames = append(scenarioNames, name)
+	}
+	sort.Strings(scenarioNames)
+	scenarios := make([]starlark.Value, 0, len(scenarioNames))
+	for _, name := range scenarioNames {
 		scenarios = append(scenarios, starlark.String(name))
 	}
 	return starlark.NewList(scenarios), nil
