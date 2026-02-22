@@ -6,20 +6,24 @@ import (
 	"sync"
 	"time"
 
-	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
 
 const (
-	OperationWorkflowName = "safeclaw.nondet.operation.workflow"
-	OperationActivityName = "safeclaw.nondet.operation.activity"
+	OperationWorkflowName      = "safeclaw.nondet.operation.workflow"
+	OperationActivityName      = "safeclaw.nondet.operation.activity"
+	OperationBatchWorkflowName = "safeclaw.nondet.operation.batch.workflow"
+	OperationBatchActivityName = "safeclaw.nondet.operation.batch.activity"
 )
 
 type Executor interface {
 	Execute(ctx context.Context, op string, payload []byte) ([]byte, error)
+	ExecuteWithWorkflowContext(ctx workflow.Context, op string, payload []byte) ([]byte, error)
+	ExecuteBatch(ctx context.Context, reqs []OperationRequest) ([][]byte, error)
 	Close() error
 }
 
@@ -34,26 +38,41 @@ type LocalExecutor struct{}
 func (e *LocalExecutor) Execute(ctx context.Context, op string, payload []byte) ([]byte, error) {
 	return ExecuteLocal(ctx, op, payload)
 }
+func (e *LocalExecutor) ExecuteWithWorkflowContext(ctx workflow.Context, op string, payload []byte) ([]byte, error) {
+	return ExecuteLocal(context.Background(), op, payload)
+}
+func (e *LocalExecutor) ExecuteBatch(ctx context.Context, reqs []OperationRequest) ([][]byte, error) {
+	out := make([][]byte, 0, len(reqs))
+	for _, req := range reqs {
+		raw, err := ExecuteLocalWithPolicy(ctx, req.Op, req.Payload, req.ScriptPolicy)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, raw)
+	}
+	return out, nil
+}
 
 func (e *LocalExecutor) Close() error { return nil }
 
 type SDKExecutor struct {
-	cfg    SDKConfig
-	client client.Client
-	worker worker.Worker
-	once   sync.Once
-	err    error
+	cfg          SDKConfig
+	scriptPolicy ScriptPolicy
+	client       client.Client
+	worker       worker.Worker
+	once         sync.Once
+	err          error
 }
 
-func NewSDKExecutor(cfg SDKConfig) *SDKExecutor {
-	return &SDKExecutor{cfg: cfg}
+func NewSDKExecutor(cfg SDKConfig, scriptPolicy ScriptPolicy) *SDKExecutor {
+	return &SDKExecutor{cfg: cfg, scriptPolicy: scriptPolicy}
 }
 
 func (e *SDKExecutor) Execute(ctx context.Context, op string, payload []byte) ([]byte, error) {
 	if err := e.ensureStarted(); err != nil {
 		return nil, err
 	}
-	req := OperationRequest{Op: op, Payload: payload}
+	req := OperationRequest{Op: op, Payload: payload, ScriptPolicy: e.scriptPolicy}
 	run, err := e.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        fmt.Sprintf("safeclaw-nondet-%d", time.Now().UnixNano()),
 		TaskQueue: e.cfg.TaskQueue,
@@ -78,6 +97,40 @@ func (e *SDKExecutor) Close() error {
 	return nil
 }
 
+func (e *SDKExecutor) ExecuteWithWorkflowContext(ctx workflow.Context, op string, payload []byte) ([]byte, error) {
+	req := OperationRequest{Op: op, Payload: payload, ScriptPolicy: e.scriptPolicy}
+	ao := workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second}
+	ctx = workflow.WithActivityOptions(ctx, ao)
+	var out []byte
+	if err := workflow.ExecuteActivity(ctx, OperationActivityName, req).Get(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (e *SDKExecutor) ExecuteBatch(ctx context.Context, reqs []OperationRequest) ([][]byte, error) {
+	if err := e.ensureStarted(); err != nil {
+		return nil, err
+	}
+	for i := range reqs {
+		if len(reqs[i].ScriptPolicy.Allowlist) == 0 {
+			reqs[i].ScriptPolicy = e.scriptPolicy
+		}
+	}
+	run, err := e.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        fmt.Sprintf("safeclaw-nondet-batch-%d", time.Now().UnixNano()),
+		TaskQueue: e.cfg.TaskQueue,
+	}, OperationBatchWorkflowName, reqs)
+	if err != nil {
+		return nil, err
+	}
+	var out [][]byte
+	if err := run.Get(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (e *SDKExecutor) ensureStarted() error {
 	e.once.Do(func() {
 		if e.cfg.HostPort == "" {
@@ -99,7 +152,9 @@ func (e *SDKExecutor) ensureStarted() error {
 		}
 		w := worker.New(c, e.cfg.TaskQueue, worker.Options{})
 		w.RegisterWorkflowWithOptions(OperationWorkflow, workflow.RegisterOptions{Name: OperationWorkflowName})
+		w.RegisterWorkflowWithOptions(OperationBatchWorkflow, workflow.RegisterOptions{Name: OperationBatchWorkflowName})
 		w.RegisterActivityWithOptions(OperationActivity, activity.RegisterOptions{Name: OperationActivityName})
+		w.RegisterActivityWithOptions(OperationBatchActivity, activity.RegisterOptions{Name: OperationBatchActivityName})
 		if err := w.Start(); err != nil {
 			c.Close()
 			e.err = err
@@ -112,18 +167,19 @@ func (e *SDKExecutor) ensureStarted() error {
 }
 
 type TestsuiteExecutor struct {
-	suite testsuite.WorkflowTestSuite
+	suite        testsuite.WorkflowTestSuite
+	scriptPolicy ScriptPolicy
 }
 
-func NewTestsuiteExecutor() *TestsuiteExecutor {
-	return &TestsuiteExecutor{}
+func NewTestsuiteExecutor(scriptPolicy ScriptPolicy) *TestsuiteExecutor {
+	return &TestsuiteExecutor{scriptPolicy: scriptPolicy}
 }
 
 func (e *TestsuiteExecutor) Execute(ctx context.Context, op string, payload []byte) ([]byte, error) {
 	env := e.suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(OperationWorkflow, workflow.RegisterOptions{Name: OperationWorkflowName})
 	env.RegisterActivityWithOptions(OperationActivity, activity.RegisterOptions{Name: OperationActivityName})
-	req := OperationRequest{Op: op, Payload: payload}
+	req := OperationRequest{Op: op, Payload: payload, ScriptPolicy: e.scriptPolicy}
 	env.ExecuteWorkflow(OperationWorkflow, req)
 	if err := env.GetWorkflowError(); err != nil {
 		return nil, err
@@ -137,6 +193,35 @@ func (e *TestsuiteExecutor) Execute(ctx context.Context, op string, payload []by
 
 func (e *TestsuiteExecutor) Close() error { return nil }
 
+func (e *TestsuiteExecutor) ExecuteWithWorkflowContext(ctx workflow.Context, op string, payload []byte) ([]byte, error) {
+	req := OperationRequest{Op: op, Payload: payload, ScriptPolicy: e.scriptPolicy}
+	var out []byte
+	if err := workflow.ExecuteActivity(ctx, OperationActivityName, req).Get(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (e *TestsuiteExecutor) ExecuteBatch(ctx context.Context, reqs []OperationRequest) ([][]byte, error) {
+	env := e.suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(OperationBatchWorkflow, workflow.RegisterOptions{Name: OperationBatchWorkflowName})
+	env.RegisterActivityWithOptions(OperationBatchActivity, activity.RegisterOptions{Name: OperationBatchActivityName})
+	for i := range reqs {
+		if len(reqs[i].ScriptPolicy.Allowlist) == 0 {
+			reqs[i].ScriptPolicy = e.scriptPolicy
+		}
+	}
+	env.ExecuteWorkflow(OperationBatchWorkflow, reqs)
+	if err := env.GetWorkflowError(); err != nil {
+		return nil, err
+	}
+	var out [][]byte
+	if err := env.GetWorkflowResult(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func OperationWorkflow(ctx workflow.Context, req OperationRequest) ([]byte, error) {
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -148,5 +233,27 @@ func OperationWorkflow(ctx workflow.Context, req OperationRequest) ([]byte, erro
 }
 
 func OperationActivity(ctx context.Context, req OperationRequest) ([]byte, error) {
-	return ExecuteLocal(ctx, req.Op, req.Payload)
+	return ExecuteLocalWithPolicy(ctx, req.Op, req.Payload, req.ScriptPolicy)
+}
+
+func OperationBatchWorkflow(ctx workflow.Context, reqs []OperationRequest) ([][]byte, error) {
+	ao := workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+	}
+	ctx = workflow.WithActivityOptions(ctx, ao)
+	var out [][]byte
+	err := workflow.ExecuteActivity(ctx, OperationBatchActivityName, reqs).Get(ctx, &out)
+	return out, err
+}
+
+func OperationBatchActivity(ctx context.Context, reqs []OperationRequest) ([][]byte, error) {
+	out := make([][]byte, 0, len(reqs))
+	for _, req := range reqs {
+		raw, err := ExecuteLocalWithPolicy(ctx, req.Op, req.Payload, req.ScriptPolicy)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, raw)
+	}
+	return out, nil
 }

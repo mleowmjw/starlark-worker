@@ -12,9 +12,10 @@ import (
 )
 
 type TemporalConfig struct {
-	HostPort  string
-	Namespace string
-	TaskQueue string
+	HostPort     string
+	Namespace    string
+	TaskQueue    string
+	ScriptPolicy temporalops.ScriptPolicy
 }
 
 type TestClockConfig struct {
@@ -42,6 +43,9 @@ type runtime struct {
 
 func (r *runtime) Mode() mode.Value { return r.mode }
 func (r *runtime) Execute(ctx context.Context, op string, payload []byte) ([]byte, error) {
+	if wfCtx, ok := temporalops.GetWorkflowContext(ctx); ok {
+		return r.exec.ExecuteWithWorkflowContext(wfCtx, op, payload)
+	}
 	return r.exec.Execute(ctx, op, payload)
 }
 func (r *runtime) Close() error { return r.exec.Close() }
@@ -55,7 +59,7 @@ func New(modeValue mode.Value, temporal TemporalConfig, testClock TestClockConfi
 		}
 		return &runtime{
 			mode:               modeValue,
-			exec:               temporalops.NewTestsuiteExecutor(),
+			exec:               temporalops.NewTestsuiteExecutor(temporal.ScriptPolicy),
 			baseUnixNano:       base,
 			autoAdvanceOnSleep: !testClock.DisableAutoAdvanceOnSleep,
 		}
@@ -66,7 +70,7 @@ func New(modeValue mode.Value, temporal TemporalConfig, testClock TestClockConfi
 				HostPort:  temporal.HostPort,
 				Namespace: temporal.Namespace,
 				TaskQueue: temporal.TaskQueue,
-			}),
+			}, temporal.ScriptPolicy),
 		}
 	default:
 		return &runtime{mode: mode.Dev, exec: &temporalops.LocalExecutor{}}
@@ -121,8 +125,42 @@ func RandInt(ctx context.Context, r Runtime, min, max int) (int, error) {
 	return out.Value, nil
 }
 
+func RandIntSeeded(ctx context.Context, r Runtime, min, max int, seed int64, counter uint64) (int, error) {
+	in, _ := json.Marshal(temporalops.RandIntInput{
+		Min:     min,
+		Max:     max,
+		Seed:    &seed,
+		Counter: counter,
+	})
+	b, err := r.Execute(ctx, temporalops.OpRandInt, in)
+	if err != nil {
+		return 0, err
+	}
+	var out temporalops.RandIntOutput
+	if err := json.Unmarshal(b, &out); err != nil {
+		return 0, err
+	}
+	return out.Value, nil
+}
+
 func RandFloat(ctx context.Context, r Runtime) (float64, error) {
 	b, err := r.Execute(ctx, temporalops.OpRandFloat, nil)
+	if err != nil {
+		return 0, err
+	}
+	var out temporalops.RandFloatOutput
+	if err := json.Unmarshal(b, &out); err != nil {
+		return 0, err
+	}
+	return out.Value, nil
+}
+
+func RandFloatSeeded(ctx context.Context, r Runtime, seed int64, counter uint64) (float64, error) {
+	in, _ := json.Marshal(temporalops.RandFloatInput{
+		Seed:    &seed,
+		Counter: counter,
+	})
+	b, err := r.Execute(ctx, temporalops.OpRandFloat, in)
 	if err != nil {
 		return 0, err
 	}
@@ -174,6 +212,48 @@ func SQLiteQuery(ctx context.Context, r Runtime, in temporalops.SQLiteQueryInput
 		return temporalops.SQLiteQueryOutput{}, err
 	}
 	return out, nil
+}
+
+func ScriptExec(ctx context.Context, r Runtime, command string, stdin []byte) ([]byte, error) {
+	payload, _ := json.Marshal(temporalops.ScriptExecInput{
+		Command: command,
+		Stdin:   stdin,
+	})
+	raw, err := r.Execute(ctx, temporalops.OpScriptExec, payload)
+	if err != nil {
+		return nil, err
+	}
+	var out temporalops.ScriptOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out.Bytes, nil
+}
+
+func ScriptFile(ctx context.Context, r Runtime, path string) ([]byte, error) {
+	payload, _ := json.Marshal(temporalops.ScriptFileInput{Path: path})
+	raw, err := r.Execute(ctx, temporalops.OpScriptFile, payload)
+	if err != nil {
+		return nil, err
+	}
+	var out temporalops.ScriptOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out.Bytes, nil
+}
+
+func ScriptPipeline(ctx context.Context, r Runtime, in temporalops.ScriptPipelineInput) ([]byte, error) {
+	payload, _ := json.Marshal(in)
+	raw, err := r.Execute(ctx, temporalops.OpScriptPipeline, payload)
+	if err != nil {
+		return nil, err
+	}
+	var out temporalops.ScriptOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out.Bytes, nil
 }
 
 func MustGet(ctx context.Context, r Runtime) Runtime {

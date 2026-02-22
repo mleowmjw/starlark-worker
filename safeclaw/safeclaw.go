@@ -11,6 +11,7 @@ import (
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/mode"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/temporalops"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
 	"go.starlark.net/starlark"
 )
@@ -56,6 +57,11 @@ type TestRuntimeOptions struct {
 	DisableAutoAdvanceOnSleep bool
 }
 
+type ScriptRuntimeOptions struct {
+	// Allowlist controls allowed shell commands in non-dev modes.
+	Allowlist []string
+}
+
 // RunOptions configures one script execution.
 type RunOptions struct {
 	// Environ contains per-run environment variables passed to plugins.
@@ -64,6 +70,8 @@ type RunOptions struct {
 	Temporal TemporalRuntimeOptions
 	// Test configures deterministic test-mode clock behavior.
 	Test TestRuntimeOptions
+	// Script controls script-plugin policy in non-dev modes.
+	Script ScriptRuntimeOptions
 }
 
 const threadLocalRuntimeKey = "nondet_runtime"
@@ -153,6 +161,9 @@ func (r *Runner) run(ctx context.Context, fs star.FS, path, function string, arg
 		HostPort:  opts.Temporal.HostPort,
 		Namespace: opts.Temporal.Namespace,
 		TaskQueue: opts.Temporal.TaskQueue,
+		ScriptPolicy: temporalops.ScriptPolicy{
+			Allowlist: opts.Script.Allowlist,
+		},
 	}, nondet.TestClockConfig{
 		FixedUnixNano:             opts.Test.FixedUnixNano,
 		DisableAutoAdvanceOnSleep: opts.Test.DisableAutoAdvanceOnSleep,
@@ -195,6 +206,9 @@ func (r *Runner) run(ctx context.Context, fs star.FS, path, function string, arg
 	// Fix Bug 4: Store atexit module in thread-local storage for register/unregister functions
 	if atexitModule, ok := pluginModules["atexit"]; ok {
 		thread.SetLocal("atexit_module", atexitModule)
+	}
+	if scriptModule, ok := pluginModules["script"]; ok {
+		thread.SetLocal("script_module", scriptModule)
 	}
 
 	// Setup module loader

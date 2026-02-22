@@ -1,10 +1,10 @@
 # Safeclaw: Hermetic Starlark Execution Core
 
-Safeclaw is a standalone Go module that provides safe, hermetic execution of Starlark scripts. It extracts the core Starlark execution engine from `starlark-worker`, removing all Temporal/Cadence workflow dependencies and replacing them with idiomatic Go 1.25 stdlib.
+Safeclaw is a standalone Go module that provides safe, hermetic execution of Starlark scripts. It extracts the core Starlark execution engine from `starlark-worker`, with mode-aware runtime routing for nondeterministic operations.
 
 ## Features
 
-- **Pure Go 1.25**: Uses stdlib features like `log/slog`, `context.Context`, `errors.Join`, `encoding/json`
+- **Go 1.26**: Uses modern stdlib features like `log/slog`, `context.Context`, `errors.Join`, `encoding/json`
 - **12 Built-in Plugins**: json, time, random, uuid, os, hashlib, test, atexit, progress, concurrent, request, script
 - **Hermetic Execution**: Sandboxed Starlark environment with controlled capabilities
 - **Extensible**: Easy to create custom plugins
@@ -14,7 +14,7 @@ Safeclaw is a standalone Go module that provides safe, hermetic execution of Sta
 
 ### Prerequisites
 
-- Go 1.25 or later
+- Go 1.26 or later
 - Git
 
 ### Install SafeClaw
@@ -95,6 +95,31 @@ result, err := runner.RunScript(ctx, fs, "script.star", "function", args...)
 tarData := []byte{...} // gzipped tar archive
 result, err := runner.RunTar(ctx, tarData, "/main.star", "function", args...)
 ```
+
+### Runtime Modes and RunOptions
+
+Safeclaw resolves runtime mode from `CHAMELEON_MODE` or `SAFECLAW_ENV`:
+
+- `dev`: local stdlib execution
+- `staging|prod`: Temporal SDK-backed execution
+- `test`: Temporal testsuite-backed deterministic execution
+
+Use `RunSourceWithOptions`, `RunScriptWithOptions`, or `RunTarWithOptions` to pass per-run settings:
+
+```go
+fixed := int64(1700000000000000000)
+result, err := runner.RunSourceWithOptions(ctx, source, "run", safeclaw.RunOptions{
+    Environ: map[string]string{"SAFECLAW_ENV": "test"},
+    Test: safeclaw.TestRuntimeOptions{
+        FixedUnixNano: &fixed,
+    },
+    Script: safeclaw.ScriptRuntimeOptions{
+        Allowlist: []string{"tr", "sed"},
+    },
+})
+```
+
+`Script.Allowlist` is enforced in non-dev modes by the runtime execution layer, not by plugin-local checks.
 
 ## Architecture
 

@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/ext"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/mode"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
 	"go.starlark.net/starlark"
 )
 
@@ -29,7 +30,7 @@ func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Val
 		}
 	}
 	delta := effectiveTime.Sub(info.StartTime)
-	
+
 	m := &Module{
 		delta:   delta,
 		runtime: info.Runtime,
@@ -83,7 +84,7 @@ func _sleep(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwarg
 	}
 
 	duration := time.Duration(float64(time.Second) * sf)
-	
+
 	ctx := safeclaw.GetContext(t)
 	if err := nondet.Sleep(ctx, receiver.runtime, duration); err != nil {
 		logger.Info("time.sleep: interrupted by context cancellation", "elapsed", duration)
@@ -97,6 +98,9 @@ func _time_ns(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwa
 	receiver := fn.Receiver().(*Module)
 	now, err := nondet.Now(safeclaw.GetContext(t), receiver.runtime)
 	if err != nil {
+		if receiver.runtime.Mode() != mode.Dev {
+			return nil, err
+		}
 		now = time.Now()
 	}
 	ns := now.Add(receiver.delta).UnixNano()
@@ -108,6 +112,9 @@ func _time(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs
 	receiver := fn.Receiver().(*Module)
 	now, err := nondet.Now(safeclaw.GetContext(t), receiver.runtime)
 	if err != nil {
+		if receiver.runtime.Mode() != mode.Dev {
+			return nil, err
+		}
 		now = time.Now()
 	}
 	ns := now.Add(receiver.delta).UnixNano()
@@ -146,18 +153,18 @@ func parseStarlarkTime(value string) (time.Time, error) {
 	if len(parts) != 2 {
 		return time.Time{}, fmt.Errorf("invalid STARLARK_TIME format: %s", value)
 	}
-	
+
 	scheme := parts[0]
 	rest := parts[1]
-	
+
 	if scheme != "unix" {
 		return time.Time{}, fmt.Errorf("unsupported STARLARK_TIME scheme: %s", scheme)
 	}
-	
+
 	var seconds int64
 	if _, err := fmt.Sscanf(rest, "%d", &seconds); err != nil {
 		return time.Time{}, fmt.Errorf("invalid STARLARK_TIME value: %s", rest)
 	}
-	
+
 	return time.Unix(seconds, 0), nil
 }

@@ -12,26 +12,33 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
+	"github.com/bitfield/script"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
 const (
-	OpNow           = "now"
-	OpSleep         = "sleep"
-	OpRandInt       = "rand_int"
-	OpRandFloat     = "rand_float"
-	OpUUID4         = "uuid4"
-	OpHTTPRequestDo = "http_do"
-	OpSQLiteExec    = "sqlite_exec"
-	OpSQLiteQuery   = "sqlite_query"
+	OpNow            = "now"
+	OpSleep          = "sleep"
+	OpRandInt        = "rand_int"
+	OpRandFloat      = "rand_float"
+	OpUUID4          = "uuid4"
+	OpHTTPRequestDo  = "http_do"
+	OpSQLiteExec     = "sqlite_exec"
+	OpSQLiteQuery    = "sqlite_query"
+	OpScriptExec     = "script_exec"
+	OpScriptFile     = "script_file"
+	OpScriptPipeline = "script_pipeline"
 )
 
 type OperationRequest struct {
-	Op      string `json:"op"`
-	Payload []byte `json:"payload,omitempty"`
+	Op           string       `json:"op"`
+	Payload      []byte       `json:"payload,omitempty"`
+	ScriptPolicy ScriptPolicy `json:"script_policy,omitempty"`
 }
 
 type NowOutput struct {
@@ -43,8 +50,10 @@ type SleepInput struct {
 }
 
 type RandIntInput struct {
-	Min int `json:"min"`
-	Max int `json:"max"`
+	Min     int    `json:"min"`
+	Max     int    `json:"max"`
+	Seed    *int64 `json:"seed,omitempty"`
+	Counter uint64 `json:"counter,omitempty"`
 }
 
 type RandIntOutput struct {
@@ -53,6 +62,11 @@ type RandIntOutput struct {
 
 type RandFloatOutput struct {
 	Value float64 `json:"value"`
+}
+
+type RandFloatInput struct {
+	Seed    *int64 `json:"seed,omitempty"`
+	Counter uint64 `json:"counter,omitempty"`
 }
 
 type UUIDOutput struct {
@@ -89,7 +103,45 @@ type SQLiteQueryOutput struct {
 	Rows []map[string]any `json:"rows"`
 }
 
+type ScriptExecInput struct {
+	Command string `json:"command"`
+	Stdin   []byte `json:"stdin,omitempty"`
+}
+
+type ScriptFileInput struct {
+	Path string `json:"path"`
+}
+
+type ScriptOutput struct {
+	Bytes []byte `json:"bytes"`
+}
+
+type ScriptPipelineInput struct {
+	Source ScriptSource `json:"source"`
+	Ops    []ScriptOp   `json:"ops,omitempty"`
+}
+
+type ScriptSource struct {
+	Kind string `json:"kind"`
+	Data string `json:"data,omitempty"`
+}
+
+type ScriptOp struct {
+	Kind string `json:"kind"`
+	A    string `json:"a,omitempty"`
+	B    string `json:"b,omitempty"`
+}
+
 func ExecuteLocal(ctx context.Context, op string, payload []byte) ([]byte, error) {
+	return ExecuteLocalWithPolicy(ctx, op, payload, ScriptPolicy{})
+}
+
+func ExecuteLocalWithPolicy(ctx context.Context, op string, payload []byte, policy ScriptPolicy) ([]byte, error) {
+	allow := normalizeAllowlist(policy.Allowlist)
+	if len(allow) == 0 {
+		allow = normalizeAllowlist(DefaultScriptAllowlist())
+	}
+
 	switch op {
 	case OpNow:
 		out := NowOutput{UnixNano: time.Now().UnixNano()}
@@ -113,10 +165,30 @@ func ExecuteLocal(ctx context.Context, op string, payload []byte) ([]byte, error
 		if err := json.Unmarshal(payload, &in); err != nil {
 			return nil, err
 		}
-		out := RandIntOutput{Value: rand.IntN(in.Max-in.Min+1) + in.Min}
+		var v int
+		if in.Seed != nil {
+			r := rand.New(rand.NewPCG(uint64(*in.Seed)+in.Counter, uint64(*in.Seed)^in.Counter))
+			v = r.IntN(in.Max-in.Min+1) + in.Min
+		} else {
+			v = rand.IntN(in.Max-in.Min+1) + in.Min
+		}
+		out := RandIntOutput{Value: v}
 		return json.Marshal(out)
 	case OpRandFloat:
-		out := RandFloatOutput{Value: rand.Float64()}
+		var in RandFloatInput
+		if len(payload) > 0 {
+			if err := json.Unmarshal(payload, &in); err != nil {
+				return nil, err
+			}
+		}
+		var v float64
+		if in.Seed != nil {
+			r := rand.New(rand.NewPCG(uint64(*in.Seed)+in.Counter, uint64(*in.Seed)^in.Counter))
+			v = r.Float64()
+		} else {
+			v = rand.Float64()
+		}
+		out := RandFloatOutput{Value: v}
 		return json.Marshal(out)
 	case OpUUID4:
 		out := UUIDOutput{Value: uuid.New().String()}
@@ -202,9 +274,105 @@ func ExecuteLocal(ctx context.Context, op string, payload []byte) ([]byte, error
 			return nil, err
 		}
 		return json.Marshal(SQLiteQueryOutput{Rows: outRows})
+	case OpScriptExec:
+		var in ScriptExecInput
+		if err := json.Unmarshal(payload, &in); err != nil {
+			return nil, err
+		}
+		commandName := firstCommandName(in.Command)
+		if commandName == "" {
+			return nil, fmt.Errorf("script command is empty")
+		}
+		if _, ok := allow[strings.ToLower(commandName)]; !ok {
+			return nil, fmt.Errorf("script command not allowed in non-dev mode: %s", commandName)
+		}
+		var p *script.Pipe
+		if len(in.Stdin) > 0 {
+			p = script.Echo(string(in.Stdin)).Exec(in.Command)
+		} else {
+			p = script.Exec(in.Command)
+		}
+		out, err := p.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(ScriptOutput{Bytes: out})
+	case OpScriptFile:
+		var in ScriptFileInput
+		if err := json.Unmarshal(payload, &in); err != nil {
+			return nil, err
+		}
+		out, err := script.File(in.Path).Bytes()
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(ScriptOutput{Bytes: out})
+	case OpScriptPipeline:
+		var in ScriptPipelineInput
+		if err := json.Unmarshal(payload, &in); err != nil {
+			return nil, err
+		}
+		out, err := executeScriptPipeline(in, allow)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(ScriptOutput{Bytes: out})
 	default:
 		return nil, fmt.Errorf("unsupported nondet operation: %s", op)
 	}
+}
+
+var commandNamePattern = regexp.MustCompile(`^\s*([A-Za-z0-9._/-]+)`)
+
+func firstCommandName(command string) string {
+	m := commandNamePattern.FindStringSubmatch(command)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
+func executeScriptPipeline(in ScriptPipelineInput, allow map[string]struct{}) ([]byte, error) {
+	var p *script.Pipe
+	switch in.Source.Kind {
+	case "exec":
+		cmd := firstCommandName(in.Source.Data)
+		if cmd == "" {
+			return nil, fmt.Errorf("script command is empty")
+		}
+		if _, ok := allow[strings.ToLower(cmd)]; !ok {
+			return nil, fmt.Errorf("script command not allowed in non-dev mode: %s", cmd)
+		}
+		p = script.Exec(in.Source.Data)
+	case "file":
+		p = script.File(in.Source.Data)
+	case "echo":
+		p = script.Echo(in.Source.Data)
+	default:
+		return nil, fmt.Errorf("unsupported script source kind: %s", in.Source.Kind)
+	}
+
+	for _, op := range in.Ops {
+		switch op.Kind {
+		case "exec":
+			cmd := firstCommandName(op.A)
+			if cmd == "" {
+				return nil, fmt.Errorf("script command is empty")
+			}
+			if _, ok := allow[strings.ToLower(cmd)]; !ok {
+				return nil, fmt.Errorf("script command not allowed in non-dev mode: %s", cmd)
+			}
+			p = p.Exec(op.A)
+		case "match":
+			p = p.Match(op.A)
+		case "replace":
+			p = p.Replace(op.A, op.B)
+		default:
+			return nil, fmt.Errorf("unsupported script op kind: %s", op.Kind)
+		}
+	}
+
+	return p.Bytes()
 }
 
 func DecodeHTTPResponse(raw []byte) (*http.Response, error) {

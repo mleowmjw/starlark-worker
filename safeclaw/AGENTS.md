@@ -1825,11 +1825,30 @@ rows = sqlite.query(db_path="data/automation.sqlite", sql="SELECT id FROM t;")
   2) normalized output (filter Temporal debug lines),
   3) semantic output (ignore expected time jitter unless fixed clock is set).
 
-**Document Version**: 1.2  
+## Temporal Phase 2 Learnings (2026-02)
+
+### Contract coverage completed
+- Added `RunOptions.Script.Allowlist` and propagated policy into runtime/executor configuration.
+- Moved non-dev `script` side effects behind runtime contracts (`temporalops` operations), while keeping Starlark plugin APIs unchanged.
+- Brought seeded `random` paths under runtime execution in non-dev/test by passing seed+counter through nondet operations.
+- Hardened `time` plugin behavior so non-dev modes return runtime errors instead of silently falling back to local wall clock.
+
+### Overhead reduction direction
+- Added a pipeline-level script operation (`script_pipeline`) so each non-dev sink call is executed as one runtime operation instead of multiple per chained method.
+- Added executor support for workflow-context activity execution (`ExecuteWithWorkflowContext`) and batch workflow/activity plumbing (`ExecuteBatch`) for grouped operations.
+- Runtime now detects workflow context and chooses activity path directly when available, preserving compatibility fallback behavior.
+
+### Regression coverage added
+- Script allow/deny tests in `test` mode with configurable allowlist.
+- Dev-vs-test parity test for seeded random behavior.
+- Dev-vs-test parity test for script transform outputs.
+
+**Document Version**: 1.3  
 **Last Updated**: 2026-02-22  
 **Maintained By**: AI Agent Implementation Team
 
 **Changelog**:
+- v1.3 (2026-02-22): Added Temporal Phase 2 learnings (script policy, seeded random contract coverage, runtime hardening, and overhead path updates)
 - v1.2 (2026-02-22): Added concise Temporalized Nondeterminism learnings and validation checklist
 - v1.1 (2026-02-07): Added "Critical Bug Fixes & Learnings" section with comprehensive bug reproduction, fixes, and key learnings
 - v1.0 (2026-02-06): Initial implementation documentation

@@ -2,6 +2,7 @@ package safeclaw_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
@@ -333,4 +334,92 @@ func TestTarFS(t *testing.T) {
 	// This would require creating a tar file, which we'll skip for brevity
 	// but the functionality is tested in example 07_files
 	t.Skip("TarFS tested in examples/07_files")
+}
+
+func TestScriptPolicyAllowlistInTestMode(t *testing.T) {
+	runner := safeclaw.NewRunner(plugin.DefaultPlugins(), nil)
+	source := []byte(`
+load("@plugin", "script")
+
+def run():
+    return script.echo("abc").exec("tr a-z A-Z").string()
+`)
+	result, err := runner.RunSourceWithOptions(context.Background(), source, "run", safeclaw.RunOptions{
+		Environ: map[string]string{"SAFECLAW_ENV": "test"},
+		Script:  safeclaw.ScriptRuntimeOptions{Allowlist: []string{"tr"}},
+	})
+	if err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+	if !strings.Contains(result.String(), "ABC") {
+		t.Fatalf("Expected output to contain ABC, got %s", result.String())
+	}
+}
+
+func TestScriptPolicyDenyInTestMode(t *testing.T) {
+	runner := safeclaw.NewRunner(plugin.DefaultPlugins(), nil)
+	source := []byte(`
+load("@plugin", "script")
+
+def run():
+    return script.echo("abc").exec("tr a-z A-Z").string()
+`)
+	_, err := runner.RunSourceWithOptions(context.Background(), source, "run", safeclaw.RunOptions{
+		Environ: map[string]string{"SAFECLAW_ENV": "test"},
+		Script:  safeclaw.ScriptRuntimeOptions{Allowlist: []string{"sed"}},
+	})
+	if err == nil {
+		t.Fatalf("expected restricted script command error")
+	}
+	if !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("expected allowlist error, got %v", err)
+	}
+}
+
+func TestSeededRandomParityDevVsTest(t *testing.T) {
+	runner := safeclaw.NewRunner(plugin.DefaultPlugins(), nil)
+	source := []byte(`
+load("@plugin", "random")
+
+def run():
+    random.seed(42)
+    return "{}|{}".format(random.randint(min=1, max=100), random.random())
+`)
+	devRes, err := runner.RunSource(context.Background(), source, "run")
+	if err != nil {
+		t.Fatalf("dev run failed: %v", err)
+	}
+	testRes, err := runner.RunSourceWithOptions(context.Background(), source, "run", safeclaw.RunOptions{
+		Environ: map[string]string{"SAFECLAW_ENV": "test"},
+	})
+	if err != nil {
+		t.Fatalf("test-mode run failed: %v", err)
+	}
+	if devRes.String() != testRes.String() {
+		t.Fatalf("seeded parity mismatch dev=%s test=%s", devRes.String(), testRes.String())
+	}
+}
+
+func TestModeParityForScriptEchoPipeline(t *testing.T) {
+	runner := safeclaw.NewRunner(plugin.DefaultPlugins(), nil)
+	source := []byte(`
+load("@plugin", "script")
+
+def run():
+    return script.echo("x-b").replace(old="-", new="_").string()
+`)
+	devRes, err := runner.RunSource(context.Background(), source, "run")
+	if err != nil {
+		t.Fatalf("dev run failed: %v", err)
+	}
+	testRes, err := runner.RunSourceWithOptions(context.Background(), source, "run", safeclaw.RunOptions{
+		Environ: map[string]string{"SAFECLAW_ENV": "test"},
+		Script:  safeclaw.ScriptRuntimeOptions{Allowlist: []string{"tr", "sed"}},
+	})
+	if err != nil {
+		t.Fatalf("test-mode run failed: %v", err)
+	}
+	if devRes.String() != testRes.String() {
+		t.Fatalf("parity mismatch dev=%s test=%s", devRes.String(), testRes.String())
+	}
 }

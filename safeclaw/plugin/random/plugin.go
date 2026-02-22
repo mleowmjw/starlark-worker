@@ -3,10 +3,10 @@ package random
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/ext"
+	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/mode"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/runtime/nondet"
 	"go.starlark.net/starlark"
 )
@@ -21,7 +21,6 @@ func (p *plugin) ID() string {
 
 func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Value {
 	m := &Module{
-		rand:    nil, // Will be set when seed() is called
 		runtime: info.Runtime,
 	}
 	m.attributes = map[string]starlark.Value{
@@ -34,7 +33,8 @@ func (p *plugin) Module(ctx context.Context, info safeclaw.RunInfo) starlark.Val
 
 type Module struct {
 	attributes map[string]starlark.Value
-	rand       *rand.Rand
+	seed       *int64
+	counter    uint64
 	runtime    nondet.Runtime
 }
 
@@ -58,8 +58,8 @@ func (m *Module) seedFn(t *starlark.Thread, fn *starlark.Builtin, args starlark.
 		return nil, err
 	}
 
-	// create a new random source with the seed
-	m.rand = rand.New(rand.NewPCG(uint64(seed), uint64(seed)))
+	m.seed = &seed
+	m.counter = 0
 
 	return starlark.None, nil
 }
@@ -75,9 +75,17 @@ func (m *Module) randIntFn(t *starlark.Thread, fn *starlark.Builtin, args starla
 	}
 
 	var v int
-	if m.rand != nil {
-		// seed was called before and a random source was created. Use it.
-		v = m.rand.IntN(max-min+1) + min
+	if m.seed != nil && m.runtime.Mode() != mode.Dev {
+		m.counter++
+		var err error
+		v, err = nondet.RandIntSeeded(safeclaw.GetContext(t), m.runtime, min, max, *m.seed, m.counter)
+		if err != nil {
+			logger.Error("random.randint: seeded nondet runtime failed", "error", err)
+			return nil, err
+		}
+	} else if m.seed != nil {
+		v, _ = nondet.RandIntSeeded(safeclaw.GetContext(t), m.runtime, min, max, *m.seed, m.counter+1)
+		m.counter++
 	} else {
 		var err error
 		v, err = nondet.RandInt(safeclaw.GetContext(t), m.runtime, min, max)
@@ -93,9 +101,13 @@ func (m *Module) randIntFn(t *starlark.Thread, fn *starlark.Builtin, args starla
 // randFn generates a random floating point number between 0 and 1
 func (m *Module) randFn(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var v float64
-	if m.rand != nil {
-		// seed was called before and a random source was created. Use it
-		v = m.rand.Float64()
+	var err error
+	if m.seed != nil {
+		m.counter++
+		v, err = nondet.RandFloatSeeded(safeclaw.GetContext(t), m.runtime, *m.seed, m.counter)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		var err error
 		v, err = nondet.RandFloat(safeclaw.GetContext(t), m.runtime)
