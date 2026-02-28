@@ -167,11 +167,6 @@ func (r *Runner) run(ctx any, fs star.FS, path, function string, args ...any) (r
 	thread.SetLocal("workflow_backend", backend)
 	thread.SetLocal("logger", replayAwareLogger)
 
-	// Fix Bug 4: Store atexit module in thread-local storage for register/unregister functions
-	if atexitModule, ok := pluginModules["atexit"]; ok {
-		thread.SetLocal("atexit_module", atexitModule)
-	}
-
 	// Setup module loader
 	thread.Load = star.ThreadLoad(fs, r.builtins, map[string]starlark.StringDict{
 		"plugin": pluginModules,

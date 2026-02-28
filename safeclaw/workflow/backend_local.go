@@ -54,7 +54,7 @@ func (b *LocalBackend) SideEffect(f func() any) EncodedValue {
 func (b *LocalBackend) ExecuteActivity(activity any, args ...any) Future {
 	fn := reflect.ValueOf(activity)
 	fnType := fn.Type()
-	
+
 	// Validate it's a function
 	if fnType.Kind() != reflect.Func {
 		return &localFuture{
@@ -63,26 +63,26 @@ func (b *LocalBackend) ExecuteActivity(activity any, args ...any) Future {
 			ready:  true,
 		}
 	}
-	
+
 	// Build call arguments: context.Context + args
 	callArgs := []reflect.Value{reflect.ValueOf(b.ctx)}
 	for _, arg := range args {
 		callArgs = append(callArgs, reflect.ValueOf(arg))
 	}
-	
+
 	// Call the activity function
 	results := fn.Call(callArgs)
-	
+
 	// Extract (result, error) from return values
 	// Activities typically return (T, error) or just error
 	var result any
 	var err error
-	
+
 	if len(results) == 0 {
 		// No return values
 		return &localFuture{result: nil, err: nil, ready: true}
 	}
-	
+
 	// Last return value should be error (or nil)
 	lastVal := results[len(results)-1]
 	if lastVal.IsValid() && !lastVal.IsNil() {
@@ -90,12 +90,12 @@ func (b *LocalBackend) ExecuteActivity(activity any, args ...any) Future {
 			err = e
 		}
 	}
-	
+
 	// If there's a non-error return value, it's the result
 	if len(results) >= 2 {
 		result = results[0].Interface()
 	}
-	
+
 	return &localFuture{
 		result: result,
 		err:    err,
@@ -189,37 +189,37 @@ func assign(value any, valuePtr any) error {
 	if valuePtr == nil {
 		return fmt.Errorf("valuePtr is nil")
 	}
-	
+
 	ptrVal := reflect.ValueOf(valuePtr)
-	if ptrVal.Kind() != reflect.Ptr {
+	if ptrVal.Kind() != reflect.Pointer {
 		return fmt.Errorf("valuePtr must be a pointer, got %T", valuePtr)
 	}
-	
+
 	if ptrVal.IsNil() {
 		return fmt.Errorf("valuePtr is nil pointer")
 	}
-	
+
 	// Handle nil value
 	if value == nil {
 		// Set to zero value
 		ptrVal.Elem().Set(reflect.Zero(ptrVal.Elem().Type()))
 		return nil
 	}
-	
+
 	srcVal := reflect.ValueOf(value)
 	dstType := ptrVal.Elem().Type()
-	
+
 	// Direct assignment if types match
 	if srcVal.Type().AssignableTo(dstType) {
 		ptrVal.Elem().Set(srcVal)
 		return nil
 	}
-	
+
 	// Try conversion if types are convertible
 	if srcVal.Type().ConvertibleTo(dstType) {
 		ptrVal.Elem().Set(srcVal.Convert(dstType))
 		return nil
 	}
-	
+
 	return fmt.Errorf("cannot assign %T to %T", value, valuePtr)
 }

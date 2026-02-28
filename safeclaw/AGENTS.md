@@ -528,6 +528,45 @@ func myFunction(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, k
 }
 ```
 
+### Receiver vs Thread-Local: When to Use Which
+
+**RULE: Always prefer the receiver pattern. Thread-local is reserved for cross-cutting concerns only.**
+
+**Use `fn.Receiver().(*Module)` (receiver pattern) for:**
+- All module-specific state (backend, config, connections, mutable data)
+- Any value owned by the plugin
+
+How: build builtins inside `Module()` with `.BindReceiver(m)`, access via `fn.Receiver()`.
+
+```go
+func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
+    m := &Module{backend: workflow.GetBackend(ctx)}
+    m.builtins = map[string]*starlark.Builtin{
+        "do": starlark.NewBuiltin("do", doImpl).BindReceiver(m),
+    }
+    return m
+}
+
+func doImpl(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+    module := fn.Receiver().(*Module)
+    // use module.backend, module.config, etc.
+}
+```
+
+**Use `t.Local()` (thread-local) ONLY for:**
+- `"ctx"` — `context.Context` via `safeclaw.GetContext(t)`
+- `"logger"` — `*slog.Logger` via `safeclaw.GetLogger(t)`
+- `"workflow_backend"` — only for sub-thread propagation in `concurrent`
+
+These are cross-cutting concerns needed by all plugins, set once by the runner in `safeclaw.go`.
+
+**NEVER use thread-local for:**
+- Module instance retrieval (use receiver instead)
+- Plugin-specific state (store on Module struct)
+- Anything that can be accessed via the receiver
+
+**Why:** Thread-locals are stringly-typed, require manual propagation to sub-threads, have no compile-time safety, and create invisible coupling between the runner and plugins. The receiver pattern is type-safe, self-documenting, and works across sub-threads automatically.
+
 ---
 
 ## Testing Strategy
@@ -2875,11 +2914,12 @@ if backend.IsReplaying() {
 
 ---
 
-**Document Version**: 1.3  
-**Last Updated**: 2026-02-23  
+**Document Version**: 1.4  
+**Last Updated**: 2026-02-28  
 **Maintained By**: AI Agent Implementation Team
 
 **Changelog**:
+- v1.4 (2026-02-28): Added "Receiver vs Thread-Local" rule to Plugin System section. Refactored atexit and progress plugins from thread-local to receiver pattern; removed `thread.SetLocal("atexit_module", ...)` from runner.
 - v1.3 (2026-02-23): Added production readiness fixes - configurable activity options, replay-safe logging, activity self-registration, branching elimination, Temporal-aware concurrency. Includes performance analysis, comparison with parent module, and production deployment patterns.
 - v1.2 (2026-02-22): Added Temporal workflow integration learnings, cross-mode validation evidence, testing patterns, and common pitfalls
 - v1.1 (2026-02-07): Added "Critical Bug Fixes & Learnings" section with comprehensive bug reproduction, fixes, and key learnings

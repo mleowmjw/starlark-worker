@@ -114,9 +114,7 @@ func batchRun(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwa
 
 	// Launch goroutines using backend.Go
 	for i, callableObj := range callables {
-		i := i
-		callableObj := callableObj
-		
+
 		receiver.backend.Go(func() {
 			// Acquire semaphore
 			sem <- struct{}{}

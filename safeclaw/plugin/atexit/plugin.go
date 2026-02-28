@@ -17,13 +17,19 @@ func (p *plugin) ID() string {
 }
 
 func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
-	return &Module{
+	m := &Module{
 		hooks: &ExitHooks{},
 	}
+	m.builtins = map[string]*starlark.Builtin{
+		"register":   starlark.NewBuiltin("register", register).BindReceiver(m),
+		"unregister": starlark.NewBuiltin("unregister", unregister).BindReceiver(m),
+	}
+	return m
 }
 
 type Module struct {
-	hooks *ExitHooks
+	hooks    *ExitHooks
+	builtins map[string]*starlark.Builtin
 }
 
 var _ starlark.HasAttrs = &Module{}
@@ -33,38 +39,25 @@ func (f *Module) Type() string                          { return "atexit" }
 func (f *Module) Freeze()                               {}
 func (f *Module) Truth() starlark.Bool                  { return true }
 func (f *Module) Hash() (uint32, error)                 { return 0, fmt.Errorf("unhashable: atexit") }
-func (f *Module) Attr(n string) (starlark.Value, error) { return star.Attr(f, n, builtins, properties) }
-func (f *Module) AttrNames() []string                   { return star.AttrNames(builtins, properties) }
-
-var builtins = map[string]*starlark.Builtin{
-	"register":   starlark.NewBuiltin("register", register),
-	"unregister": starlark.NewBuiltin("unregister", unregister),
-}
+func (f *Module) Attr(n string) (starlark.Value, error) { return star.Attr(f, n, f.builtins, properties) }
+func (f *Module) AttrNames() []string                   { return star.AttrNames(f.builtins, properties) }
 
 var properties = map[string]star.PropertyFactory{}
 
-func register(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	// Get the module from thread local storage
-	module, ok := t.Local("atexit_module").(*Module)
-	if !ok {
-		return nil, fmt.Errorf("atexit module not found in thread")
-	}
+func register(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	module := fn.Receiver().(*Module)
 
-	fn := args[0].(starlark.Callable)
+	callable := args[0].(starlark.Callable)
 	args = args[1:]
-	module.hooks.Register(fn, args, kwargs)
+	module.hooks.Register(callable, args, kwargs)
 	return starlark.None, nil
 }
 
-func unregister(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
-	// Get the module from thread local storage
-	module, ok := t.Local("atexit_module").(*Module)
-	if !ok {
-		return nil, fmt.Errorf("atexit module not found in thread")
-	}
+func unregister(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+	module := fn.Receiver().(*Module)
 
-	fn := args[0].(starlark.Callable)
-	module.hooks.Unregister(fn)
+	callable := args[0].(starlark.Callable)
+	module.hooks.Unregister(callable)
 	return starlark.None, nil
 }
 

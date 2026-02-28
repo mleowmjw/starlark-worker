@@ -2,7 +2,6 @@ package progress
 
 import (
 	"fmt"
-	"log/slog"
 
 	"github.com/cadence-workflow/starlark-worker/safeclaw"
 	"github.com/cadence-workflow/starlark-worker/safeclaw/star"
@@ -18,13 +17,15 @@ func (p *plugin) ID() string {
 }
 
 func (p *plugin) Module(ctx any, info safeclaw.RunInfo) starlark.Value {
-	return &Module{
-		logger: info.Logger,
+	m := &Module{}
+	m.builtins = map[string]*starlark.Builtin{
+		"report": starlark.NewBuiltin("report", report).BindReceiver(m),
 	}
+	return m
 }
 
 type Module struct {
-	logger *slog.Logger
+	builtins map[string]*starlark.Builtin
 }
 
 var _ starlark.HasAttrs = &Module{}
@@ -34,8 +35,8 @@ func (f *Module) Type() string                          { return "progress" }
 func (f *Module) Freeze()                               {}
 func (f *Module) Truth() starlark.Bool                  { return true }
 func (f *Module) Hash() (uint32, error)                 { return 0, fmt.Errorf("unhashable: progress") }
-func (f *Module) Attr(n string) (starlark.Value, error) { return star.Attr(f, n, builtins, properties) }
-func (f *Module) AttrNames() []string                   { return star.AttrNames(builtins, properties) }
+func (f *Module) Attr(n string) (starlark.Value, error) { return star.Attr(f, n, f.builtins, properties) }
+func (f *Module) AttrNames() []string                   { return star.AttrNames(f.builtins, properties) }
 
 const (
 	TaskStatePending   = "PENDING"
@@ -46,10 +47,6 @@ const (
 	TaskStateSkipped   = "SKIPPED"
 )
 
-var builtins = map[string]*starlark.Builtin{
-	"report": starlark.NewBuiltin("report", report),
-}
-
 var properties = map[string]star.PropertyFactory{
 	"task_state_running":   func(receiver starlark.Value) (starlark.Value, error) { return starlark.String(TaskStateRunning), nil },
 	"task_state_pending":   func(receiver starlark.Value) (starlark.Value, error) { return starlark.String(TaskStatePending), nil },
@@ -59,10 +56,8 @@ var properties = map[string]star.PropertyFactory{
 	"task_state_skipped":   func(receiver starlark.Value) (starlark.Value, error) { return starlark.String(TaskStateSkipped), nil },
 }
 
-func report(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	// report(progress: str)
-	// Report a progress string
-
+func report(t *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	_ = fn.Receiver().(*Module)
 	logger := safeclaw.GetLogger(t)
 
 	var progressStr starlark.String

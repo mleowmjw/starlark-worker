@@ -334,3 +334,59 @@ func TestTarFS(t *testing.T) {
 	// but the functionality is tested in example 07_files
 	t.Skip("TarFS tested in examples/07_files")
 }
+
+func TestAtexitRegisterAndUnregister(t *testing.T) {
+	runner := safeclaw.NewRunner(plugin.DefaultPlugins(), nil)
+
+	source := []byte(`
+load("@plugin", "atexit")
+
+def hook_a():
+    pass
+
+def hook_b():
+    pass
+
+def test_atexit():
+    atexit.register(hook_a)
+    atexit.register(hook_b)
+    atexit.unregister(hook_b)
+    return "registered"
+`)
+
+	result, err := runner.RunSource(context.Background(), source, "test_atexit")
+	if err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+
+	if result.String() != `"registered"` {
+		t.Errorf("Expected '\"registered\"', got %s", result.String())
+	}
+}
+
+func TestAtexitFromConcurrentThread(t *testing.T) {
+	runner := safeclaw.NewRunner(plugin.DefaultPlugins(), nil)
+
+	source := []byte(`
+load("@plugin", "atexit", "concurrent")
+
+def register_hook():
+    def my_hook():
+        pass
+    atexit.register(my_hook)
+    return "ok"
+
+def test_atexit_concurrent():
+    f = concurrent.run(register_hook)
+    return f.result()
+`)
+
+	result, err := runner.RunSource(context.Background(), source, "test_atexit_concurrent")
+	if err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+
+	if result.String() != `"ok"` {
+		t.Errorf("Expected '\"ok\"', got %s", result.String())
+	}
+}
