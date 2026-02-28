@@ -60,11 +60,18 @@ var properties = map[string]star.PropertyFactory{
 	"task_state_skipped":   func(receiver starlark.Value) (starlark.Value, error) { return starlark.String(TaskStateSkipped), nil },
 }
 
-func report(t *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func report(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	// report(progress: str)
 	// Report a progress string
 
-	logger := safeclaw.GetLogger(t)
+	module, ok := b.Receiver().(*Module)
+	if !ok || module == nil {
+		return nil, fmt.Errorf("progress module receiver not found")
+	}
+	logger := module.logger
+	if logger == nil {
+		logger = safeclaw.GetLogger(t)
+	}
 
 	var progressStr starlark.String
 

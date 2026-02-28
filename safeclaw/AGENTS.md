@@ -1843,11 +1843,19 @@ rows = sqlite.query(db_path="data/automation.sqlite", sql="SELECT id FROM t;")
 - Dev-vs-test parity test for seeded random behavior.
 - Dev-vs-test parity test for script transform outputs.
 
-**Document Version**: 1.3  
-**Last Updated**: 2026-02-22  
+### Thread-Local usage rule (must follow)
+- Use `starlark.Thread` locals only for **execution-scoped cross-cutting context**: `ctx`, logger fallback, runtime handle.
+- Do **not** use thread-local storage for plugin-owned mutable state.
+- For plugin state (hooks, counters, cached handles), use module fields + builtin receiver binding (`BindReceiver`).
+- If a plugin can run with an empty thread-local map and still behave correctly, design is usually correct.
+- This rule supersedes older guidance that suggested storing plugin modules in thread-local storage.
+
+**Document Version**: 1.4  
+**Last Updated**: 2026-02-28  
 **Maintained By**: AI Agent Implementation Team
 
 **Changelog**:
+- v1.4 (2026-02-28): Added strict thread-local usage rule (execution context only; plugin state must use receiver/module fields)
 - v1.3 (2026-02-22): Added Temporal Phase 2 learnings (script policy, seeded random contract coverage, runtime hardening, and overhead path updates)
 - v1.2 (2026-02-22): Added concise Temporalized Nondeterminism learnings and validation checklist
 - v1.1 (2026-02-07): Added "Critical Bug Fixes & Learnings" section with comprehensive bug reproduction, fixes, and key learnings

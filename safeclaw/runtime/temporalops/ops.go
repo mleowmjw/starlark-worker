@@ -38,7 +38,7 @@ const (
 type OperationRequest struct {
 	Op           string       `json:"op"`
 	Payload      []byte       `json:"payload,omitempty"`
-	ScriptPolicy ScriptPolicy `json:"script_policy,omitempty"`
+	ScriptPolicy ScriptPolicy `json:"script_policy"`
 }
 
 type NowOutput struct {

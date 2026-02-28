@@ -203,10 +203,6 @@ func (r *Runner) run(ctx context.Context, fs star.FS, path, function string, arg
 	thread.SetLocal("logger", r.logger)
 	thread.SetLocal(threadLocalRuntimeKey, rt)
 
-	// Fix Bug 4: Store atexit module in thread-local storage for register/unregister functions
-	if atexitModule, ok := pluginModules["atexit"]; ok {
-		thread.SetLocal("atexit_module", atexitModule)
-	}
 	if scriptModule, ok := pluginModules["script"]; ok {
 		thread.SetLocal("script_module", scriptModule)
 	}
