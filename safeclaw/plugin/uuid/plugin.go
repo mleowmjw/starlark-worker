@@ -83,6 +83,8 @@ func (u *UUID) Attr(name string) (starlark.Value, error) {
 		return starlark.String(hex.String()), nil
 	case "urn":
 		return starlark.String("urn:uuid:" + string(u.StringUUID)), nil
+	case "bob":
+		return starlark.String("bob"), nil
 	default:
 		return nil, nil
 	}
